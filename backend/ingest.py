@@ -17,33 +17,189 @@ from typing import List
 from backend.text_extractor.extractors import extract_text_from_file, file_metadata
 
 
+def _is_structural_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+
+    if re.match(r"^(#{1,6}\s+|[-*•+]\s+|\d+[\.)]\s+)", stripped):
+        return True
+    if "|" in line and re.search(r"\w\s*\|\s*\w", line):
+        return True
+    if stripped.endswith(":"):
+        return True
+    if stripped.isupper() and len(stripped) > 3 and sum(c.isalpha() for c in stripped) / max(len(stripped), 1) > 0.6:
+        return True
+    return False
+
+
 def clean_text(text: str) -> str:
-    # Normalize unicode
     text = unicodedata.normalize("NFKC", text)
-    # Remove null bytes and control chars except newlines and tabs
-    text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", "", text)
-    # Replace Windows newlines and multiple newlines
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    # Collapse multiple spaces/tabs
+    text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", "", text)
+
+    lines = [line.rstrip() for line in text.split("\n")]
+    merged_lines: List[str] = []
+    for idx, line in enumerate(lines):
+        if not line.strip():
+            merged_lines.append("")
+            continue
+
+        next_line = lines[idx + 1] if idx + 1 < len(lines) else ""
+        if line.endswith("-") and next_line and not _is_structural_line(next_line):
+            merged_lines.append(line[:-1])
+            continue
+
+        if _is_structural_line(line) or _is_structural_line(next_line) or not next_line.strip():
+            merged_lines.append(line)
+        else:
+            merged_lines.append(f"{line} ")
+
+    text = "\n".join(merged_lines)
     text = re.sub(r"[ \t]+", " ", text)
-    # Collapse repeated newlines to max 2
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
-def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
-    if chunk_size <= 0:
-        return [text]
+def _line_kind(line: str) -> str:
+    stripped = line.strip()
+    if not stripped:
+        return "blank"
+    if re.match(r"^(#{1,6}\s+|[-*•+]\s+|\d+[\.)]\s+)", stripped):
+        return "list"
+    if "|" in line and re.search(r"\w\s*\|\s*\w", line):
+        return "table"
+    if stripped.endswith(":") or (stripped.isupper() and len(stripped) > 3):
+        return "heading"
+    return "paragraph"
+
+
+def _split_structural_blocks(text: str) -> List[str]:
+    blocks: List[str] = []
+    current: List[str] = []
+    current_type: str | None = None
+
+    for line in text.split("\n"):
+        if not line.strip():
+            if current:
+                blocks.append("\n".join(current))
+                current = []
+                current_type = None
+            continue
+
+        kind = _line_kind(line)
+        if current and kind != current_type and not (current_type == "heading" and kind == "paragraph"):
+            blocks.append("\n".join(current))
+            current = [line]
+            current_type = kind
+        else:
+            current.append(line)
+            current_type = kind if current_type is None else current_type
+
+    if current:
+        blocks.append("\n".join(current))
+    return blocks
+
+
+def _split_long_block(block: str, chunk_size: int) -> List[str]:
+    if len(block) <= chunk_size:
+        return [block]
+
+    sentences = re.split(r"(?<=[.!?])\s+", block)
     chunks: List[str] = []
-    start = 0
-    length = len(text)
-    while start < length:
-        end = min(start + chunk_size, length)
-        chunks.append(text[start:end].strip())
-        if end == length:
-            break
-        start = max(end - overlap, end)
+    current = ""
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        if not current:
+            current = sentence
+            continue
+
+        if len(current) + 1 + len(sentence) <= chunk_size:
+            current = f"{current} {sentence}"
+            continue
+
+        chunks.append(current)
+        current = sentence
+
+        if len(current) > chunk_size:
+            words = current.split()
+            current = ""
+            part = ""
+            for word in words:
+                if not part:
+                    part = word
+                elif len(part) + 1 + len(word) <= chunk_size:
+                    part = f"{part} {word}"
+                else:
+                    chunks.append(part)
+                    part = word
+            current = part
+
+    if current:
+        chunks.append(current)
     return chunks
+
+
+def _chunk_block(block: str, chunk_size: int) -> List[str]:
+    if len(block) <= chunk_size:
+        return [block]
+
+    parts: List[str] = []
+    for paragraph in block.split("\n\n"):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        if len(paragraph) <= chunk_size:
+            parts.append(paragraph)
+            continue
+        if "\n" in paragraph:
+            lines = paragraph.split("\n")
+            current = ""
+            for line in lines:
+                if not current:
+                    current = line
+                    continue
+                if len(current) + 1 + len(line) <= chunk_size:
+                    current = f"{current}\n{line}"
+                else:
+                    parts.append(current)
+                    current = line
+            if current:
+                parts.append(current)
+        else:
+            parts.extend(_split_long_block(paragraph, chunk_size))
+    return parts
+
+
+def chunk_text(text: str, chunk_size: int = 1000, overlap: int | None = None) -> List[str]:
+    if chunk_size <= 0:
+        return [text.strip()]
+
+    if overlap is None:
+        overlap = max(int(chunk_size * 0.15), 1)
+
+    blocks = _split_structural_blocks(text)
+    chunks: List[str] = []
+    for block in blocks:
+        if not block.strip():
+            continue
+        chunks.extend(_chunk_block(block, chunk_size))
+
+    if overlap <= 0:
+        return chunks
+
+    overlapped: List[str] = []
+    for index, chunk in enumerate(chunks):
+        if index == 0:
+            overlapped.append(chunk)
+            continue
+        prefix = chunks[index - 1][-overlap:]
+        overlapped.append(f"{prefix}\n\n{chunk}")
+    return overlapped
 
 
 def iter_files(input_path: Path, exts=None):
@@ -57,7 +213,16 @@ def iter_files(input_path: Path, exts=None):
                 yield p
 
 
-def process(input_path: str, output_dir: str, chunk_size: int = 1000, overlap: int = 200, jsonl: bool = False):
+def process(
+    input_path: str,
+    output_dir: str,
+    chunk_size: int = 1000,
+    overlap: int | None = None,
+    jsonl: bool = False,
+):
+    if overlap is None:
+        overlap = max(int(chunk_size * 0.15), 1)
+
     inp = Path(input_path)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
