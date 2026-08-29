@@ -1,0 +1,18 @@
+# Keep the backend build context (project root) small and clean.
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+**/.assessiq_data/
+.git/
+.gitignore
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+*.log
+.DS_Store
+.env
+.env.*
+!**/.env.example
+sample_documents/

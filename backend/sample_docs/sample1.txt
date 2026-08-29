@@ -1,0 +1,7 @@
+This is a sample TXT document.
+
+It should be ingested correctly by the text extractor.
+
+Experience:
+- Built extraction systems
+- Tested ingestion pipeline

@@ -1,0 +1,89 @@
+# ---------------------------------------------------------------------------
+# AssessIQ — full stack (backend + frontend) in one command:
+#   docker compose up --build
+# Then open http://localhost:8080  (frontend proxies /api to the backend).
+#
+# For LLM-quality generation, set ASSESSIQ_LLM_PROVIDER=openai and provide
+# OPENAI_API_KEY (e.g. in a .env file next to this compose file).
+# ---------------------------------------------------------------------------
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: assessiq_postgres
+    environment:
+      POSTGRES_DB: assessiq
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    # Uncomment to connect from host for debugging:
+    # ports:
+    #   - "5432:5432"
+
+  chroma:
+    image: ghcr.io/chroma-core/chroma:latest
+    container_name: assessiq_chroma
+    expose:
+      - "8000"
+    environment:
+      IS_PERSISTENT: "true"
+      CHROMA_DB_DIR: /chroma_data
+    volumes:
+      - chroma_data:/chroma_data
+    depends_on:
+      - postgres
+    # Uncomment to reach Chroma directly from the host:
+    # ports:
+    #   - "8001:8000"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      # Set to "true" for real Sentence-Transformers + FAISS (large image):
+      args:
+        INSTALL_ML: "false"
+    environment:
+      ASSESSIQ_LLM_PROVIDER: ${ASSESSIQ_LLM_PROVIDER:-offline}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ASSESSIQ_DATA_DIR: /data
+      ASSESSIQ_SECRET: ${ASSESSIQ_SECRET:-change-me-in-production}
+      ASSESSIQ_VECTOR_DB: ${ASSESSIQ_VECTOR_DB:-chroma}
+      CHROMA_URL: http://chroma:8000
+      ASSESSIQ_USE_SQL_DB: "true"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: assessiq
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - assessiq_data:/data
+    depends_on:
+      postgres:
+        condition: service_started
+      chroma:
+        condition: service_started
+    expose:
+      - "8000"
+    # Uncomment to reach the API directly from the host for debugging:
+    # ports:
+    #   - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_MODE: real
+        VITE_API_BASE_URL: ""   # same-origin; nginx proxies /api -> backend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  assessiq_data:
+  chroma_data:
+  postgres_data:

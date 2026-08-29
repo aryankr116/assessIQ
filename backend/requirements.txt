@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# AssessIQ backend dependencies
+# ---------------------------------------------------------------------------
+
+# --- Document parsing / OCR (existing ingestion pipeline) ------------------
+pymupdf
+python-docx
+python-pptx
+pytesseract
+Pillow
+pdfminer.six
+easyocr
+
+# --- RAG: embeddings + vector search --------------------------------------
+# sentence-transformers pulls in torch; if you skip it the backend falls back
+# to a lightweight hashing embedder automatically.
+sentence-transformers
+faiss-cpu
+chroma-db
+numpy
+
+# --- API server -----------------------------------------------------------
+fastapi
+uvicorn[standard]
+python-multipart        # required by FastAPI for file uploads
+pydantic>=2.0
+
+# --- Database (PostgreSQL + ORM) -------------------------------------------
+sqlalchemy>=2.0
+psycopg2-binary         # PostgreSQL driver
+alembic                 # database migrations
+
+# --- LLM providers (optional, pick what you use) --------------------------
+openai                  # default provider (OpenAI / OpenAI-compatible)
+requests                # used by the Ollama provider
+python-dotenv           # loads .env automatically
