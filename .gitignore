@@ -33,3 +33,4 @@ dist/
 # Generated data
 backend/structured_out/
 extracted/
+.tools/

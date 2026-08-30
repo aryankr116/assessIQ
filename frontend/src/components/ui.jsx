@@ -1,4 +1,4 @@
-// Small set of reusable, dependency-light UI primitives used across pages.
+// Reusable UI primitives used across pages.
 import { BrainCircuit, Wrench, AlertTriangle } from "lucide-react";
 
 export function Card({ className = "", children, ...props }) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Users, SlidersHorizontal, ShieldCheck, Save, Loader2, AlertCircle } from "lucide-react";
+import { Users, SlidersHorizontal, ShieldCheck, Save, Loader2, AlertCircle, Shield, Sliders, CheckCircle2 } from "lucide-react";
 import api from "../api/client.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Card, Button } from "../components/ui.jsx";
@@ -42,40 +42,48 @@ export default function Admin() {
 
   if (error) {
     return (
-      <div className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="flex items-center gap-2 rounded-2xl bg-rose-50 p-4 text-xs font-bold text-rose-700 border border-rose-200">
         <AlertCircle size={16} /> {error}
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 animate-fade-in-up">
       {/* Users */}
-      <Card className="p-6">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-          <Users size={16} className="text-brand-600" /> User accounts
-          <span className="ml-1 text-slate-400">({users.length})</span>
-        </h3>
-        <div className="mt-4 divide-y divide-slate-100">
+      <Card className="p-6 shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
+          <h3 className="flex items-center gap-2 text-sm font-extrabold text-slate-900 font-display">
+            <Users size={18} className="text-brand-600" /> Authorized Accounts
+          </h3>
+          <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-bold text-brand-700">
+            {users.length} users
+          </span>
+        </div>
+
+        <div className="mt-4 divide-y divide-slate-100/80">
           {users.map((u) => (
-            <div key={u.username} className="flex items-center justify-between py-2.5">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold uppercase text-slate-500">
+            <div key={u.username} className="flex items-center justify-between py-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-indigo-600 text-xs font-black uppercase text-white shadow-xs">
                   {u.username.slice(0, 2)}
                 </div>
-                <span className="text-sm font-medium text-slate-800">
-                  {u.username}
+                <div className="leading-tight">
+                  <span className="text-xs font-bold text-slate-900">
+                    {u.username}
+                  </span>
                   {u.username === user?.username && (
-                    <span className="ml-1.5 text-xs text-slate-400">(you)</span>
+                    <span className="ml-1.5 text-[10px] font-bold text-brand-600 bg-brand-50 px-1.5 py-0.2 rounded">
+                      YOU
+                    </span>
                   )}
-                </span>
+                </div>
               </div>
               <span
-                className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-                  u.role === "admin"
-                    ? "bg-purple-50 text-purple-700 ring-purple-200"
-                    : "bg-blue-50 text-blue-700 ring-blue-200"
-                }`}
+                className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border uppercase tracking-wider ${u.role === "admin"
+                    ? "bg-purple-50 text-purple-700 border-purple-200"
+                    : "bg-blue-50 text-blue-700 border-blue-200"
+                  }`}
               >
                 {u.role}
               </span>
@@ -85,25 +93,27 @@ export default function Admin() {
       </Card>
 
       {/* System params */}
-      <Card className="p-6">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-          <SlidersHorizontal size={16} className="text-brand-600" /> System parameters
-        </h3>
-        <p className="mt-1 text-xs text-slate-400">
-          Defaults applied to new generations across all recruiters.
-        </p>
+      <Card className="p-6 shadow-sm">
+        <div className="border-b border-slate-100 pb-3.5">
+          <h3 className="flex items-center gap-2 text-sm font-extrabold text-slate-900 font-display">
+            <SlidersHorizontal size={18} className="text-brand-600" /> RAG System Hyperparameters
+          </h3>
+          <p className="mt-1 text-xs text-slate-400">
+            Global pipeline defaults applied to new candidate assessment generations.
+          </p>
+        </div>
 
         {params && (
           <div className="mt-5 space-y-4">
             <Field
-              label="Default retrieval depth (top-k)"
+              label="Default Retrieval Depth (top-k passages)"
               value={params.defaultTopK}
               min={1}
               max={20}
               onChange={(v) => setParams({ ...params, defaultTopK: v })}
             />
             <Field
-              label="Questions per set"
+              label="Questions Per Generated Assessment"
               value={params.questionsPerSet}
               min={2}
               max={20}
@@ -111,10 +121,10 @@ export default function Admin() {
             />
             <div>
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-600">
-                  Answerability threshold
+                <label className="text-xs font-bold text-slate-700">
+                  Answerability Out-of-Scope Threshold
                 </label>
-                <span className="rounded-md bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-700">
+                <span className="rounded-lg bg-brand-50 px-2 py-0.5 text-xs font-black text-brand-700 border border-brand-200/60">
                   {Number(params.answerabilityThreshold).toFixed(2)}
                 </span>
               </div>
@@ -130,18 +140,18 @@ export default function Admin() {
                 className="mt-2 w-full accent-brand-600"
               />
               <p className="mt-1 text-[11px] text-slate-400">
-                Minimum retrieval similarity before a prompt is treated as out-of-scope.
+                Minimum cosine similarity required before a prompt is flagged as unsupported.
               </p>
             </div>
 
-            <div className="flex items-center gap-3 pt-1">
-              <Button onClick={save} disabled={saving}>
+            <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+              <Button onClick={save} disabled={saving} variant="gradient">
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                Save parameters
+                Save Hyperparameters
               </Button>
               {saved && (
-                <span className="flex items-center gap-1 text-xs text-emerald-600">
-                  <ShieldCheck size={13} /> Saved
+                <span className="flex items-center gap-1 text-xs font-bold text-emerald-600">
+                  <CheckCircle2 size={14} /> Saved successfully
                 </span>
               )}
             </div>
@@ -156,8 +166,8 @@ function Field({ label, value, min, max, onChange }) {
   return (
     <div>
       <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-slate-600">{label}</label>
-        <span className="rounded-md bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-700">
+        <label className="text-xs font-bold text-slate-700">{label}</label>
+        <span className="rounded-lg bg-brand-50 px-2 py-0.5 text-xs font-black text-brand-700 border border-brand-200/60">
           {value}
         </span>
       </div>

@@ -8,7 +8,13 @@
 //   VITE_API_BASE_URL=http://localhost:8000
 // -----------------------------------------------------------------------------
 
-import { mockDocuments, mockQASets, mockUsers, computeStats } from "./mockData.js";
+import {
+  mockDocuments,
+  mockQASets,
+  mockUsers,
+  mockCandidates,
+  computeStats,
+} from "./mockData.js";
 
 const MODE = import.meta.env.VITE_API_MODE || "mock";
 // Use ?? so an explicit empty string means "same origin" (e.g. behind an nginx
@@ -43,9 +49,11 @@ const uid = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).
 // -----------------------------------------------------------------------------
 function createMockClient() {
   let documents = mockDocuments.map((d) => ({ ...d }));
+  let candidates = mockCandidates.map((c) => ({ ...c }));
   let qaSets = mockQASets.map((s) => ({ ...s, questions: s.questions.map((q) => ({ ...q })) }));
   let users = mockUsers.map((u) => ({ ...u }));
   let params = { defaultTopK: 6, questionsPerSet: 6, answerabilityThreshold: 0.18 };
+
 
   const mockToken = (u) => `mock.${u.username}.${u.role}`;
   const userFromToken = (t) => {
@@ -89,6 +97,36 @@ function createMockClient() {
       return { ...params };
     },
 
+    // -- candidates --
+    async listCandidates() {
+      await delay(150);
+      return candidates.map((c) => ({ ...c }));
+    },
+    async createCandidate({ name, email, targetRole, resumeFile, skills, experienceYears, summary }) {
+      await delay(350);
+      const ext = resumeFile ? "." + (resumeFile.name.split(".").pop() || "").toLowerCase() : ".pdf";
+      const cand = {
+        id: uid("cand"),
+        name: name.trim(),
+        email: email?.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+        targetRole: targetRole?.trim() || "Candidate",
+        resumeName: resumeFile ? resumeFile.name : `${name.replace(/\s+/g, "_")}_Resume.pdf`,
+        resumeExt: ext,
+        resumeSizeBytes: resumeFile ? resumeFile.size : 102400,
+        uploadedAt: new Date().toISOString(),
+        skills: skills?.length ? skills : ["Problem Solving", "Technical Communication", "Core Domain Concepts"],
+        experienceYears: experienceYears || 3,
+        summary: summary || `Experienced ${targetRole || "professional"} with a background in key domain capabilities.`,
+      };
+      candidates = [cand, ...candidates];
+      return { ...cand };
+    },
+    async deleteCandidate(id) {
+      await delay(150);
+      candidates = candidates.filter((c) => c.id !== id);
+      return { ok: true };
+    },
+
     // -- documents --
     async listDocuments() {
       await delay(220);
@@ -119,9 +157,21 @@ function createMockClient() {
       await delay(180);
       return qaSets.map((s) => ({ ...s, questions: s.questions.map((q) => ({ ...q })) }));
     },
-    async generateQA({ jobRole, prompt, topK, documentIds, twoRound }) {
+    async generateQA({ candidateId, candidateName, candidateRole, candidateResumeName, jobRole, prompt, topK, documentIds, twoRound }) {
       await delay(1100);
-      const set = synthesizeQASet({ jobRole, prompt, topK, documentIds, twoRound, documents });
+      const set = synthesizeQASet({
+        candidateId,
+        candidateName,
+        candidateRole,
+        candidateResumeName,
+        jobRole,
+        prompt,
+        topK,
+        documentIds,
+        twoRound,
+        documents,
+        candidates,
+      });
       qaSets = [set, ...qaSets];
       return { ...set };
     },
@@ -142,7 +192,7 @@ function createMockClient() {
 
     async getStats() {
       await delay(120);
-      return computeStats(documents, qaSets);
+      return computeStats(documents, qaSets, candidates);
     },
   };
 }
@@ -178,7 +228,24 @@ function simulateIngestion(id, patch) {
   );
 }
 
-function synthesizeQASet({ jobRole, prompt, topK, documentIds, twoRound, documents }) {
+function synthesizeQASet({
+  candidateId,
+  candidateName,
+  candidateRole,
+  candidateResumeName,
+  jobRole,
+  prompt,
+  topK,
+  documentIds = [],
+  twoRound,
+  documents = [],
+  candidates = [],
+}) {
+  const cand = candidates.find((c) => c.id === candidateId);
+  const finalCandidateName = candidateName || cand?.name || "General Candidate";
+  const finalRole = jobRole || cand?.targetRole || candidateRole || "Candidate";
+  const finalResumeName = candidateResumeName || cand?.resumeName || null;
+
   const selected = documents.filter((d) => documentIds.includes(d.id) && d.status === "indexed");
   const pool = selected.length ? selected : documents.filter((d) => d.status === "indexed");
 
@@ -186,33 +253,34 @@ function synthesizeQASet({ jobRole, prompt, topK, documentIds, twoRound, documen
     id: `q${i}`,
     question:
       type === "knowledge"
-        ? `According to ${d.name}, what does the documentation say about the topic most relevant to a ${jobRole}?`
-        : `Using the conventions in ${d.name}, how would a ${jobRole} apply this in practice?`,
+        ? `According to ${d.name}, what are the core architectural policies and guidelines expected of a ${finalRole}?`
+        : `Cross-referencing ${finalCandidateName}'s profile with ${d.name}, how should they address the system reliability and operational requirements in practice?`,
     answer:
       type === "knowledge"
-        ? `Based strictly on ${d.name}: ${d.excerpt || "the relevant policy is described in the indexed text."}`
-        : `A grounded solution follows the documented approach in ${d.name} rather than general knowledge.`,
+        ? `Based strictly on ${d.name}: ${d.excerpt || "The documented standard mandates strict operational compliance and automated verification."}`
+        : `A grounded solution tailored for ${finalCandidateName} directly adheres to the engineering standard documented in ${d.name}.`,
     type,
-    confidence: Number((0.72 + Math.random() * 0.25).toFixed(2)),
+    confidence: Number((0.74 + Math.random() * 0.23).toFixed(2)),
     answerable: true,
     rating: null,
     sources: [
       {
-        docId: d.id, docName: d.name,
-        chunkId: Math.floor(Math.random() * (d.chunks || 30)),
-        snippet: (d.excerpt || "Indexed source passage.").slice(0, 140) + "…",
+        docId: d.id,
+        docName: d.name,
+        chunkId: Math.floor(Math.random() * (d.chunks || 30)) + 1,
+        snippet: (d.excerpt || "Indexed enterprise documentation passage.").slice(0, 140) + "…",
       },
     ],
   });
 
   let questions = [];
-  const limit = Math.max(2, Math.min(topK, (pool.length || 1) * 2));
+  const limit = Math.max(2, Math.min(topK || 6, (pool.length || 1) * 2));
   if (twoRound) {
     // Knowledge round, then Skill round.
-    pool.forEach((d, i) => questions.push(mk(d, "knowledge", questions.length + 1)));
-    pool.forEach((d, i) => questions.push(mk(d, "skill", questions.length + 1)));
+    pool.forEach((d) => questions.push(mk(d, "knowledge", questions.length + 1)));
+    pool.forEach((d) => questions.push(mk(d, "skill", questions.length + 1)));
   } else {
-    pool.forEach((d, i) => {
+    pool.forEach((d) => {
       questions.push(mk(d, "knowledge", questions.length + 1));
       questions.push(mk(d, "skill", questions.length + 1));
     });
@@ -223,15 +291,26 @@ function synthesizeQASet({ jobRole, prompt, topK, documentIds, twoRound, documen
     questions = [
       {
         id: "q1",
-        question: `No indexed documents were available to ground questions for a ${jobRole}.`,
-        answer: "This question cannot be answered: upload and index documents first.",
-        type: "knowledge", confidence: 0.2, answerable: false, rating: null, sources: [],
+        question: `No indexed documents were available to ground questions for ${finalCandidateName} (${finalRole}).`,
+        answer: "This question cannot be answered: upload and index enterprise documents first.",
+        type: "knowledge",
+        confidence: 0.2,
+        answerable: false,
+        rating: null,
+        sources: [],
       },
     ];
   }
 
   return {
-    id: uid("set"), jobRole, prompt, topK,
+    id: uid("set"),
+    candidateId: candidateId || cand?.id || null,
+    candidateName: finalCandidateName,
+    candidateRole: finalRole,
+    candidateResumeName: finalResumeName,
+    jobRole: finalRole,
+    prompt: prompt || `Generate interview questions for ${finalCandidateName} (${finalRole}).`,
+    topK: topK || 6,
     twoRound: !!twoRound,
     createdAt: new Date().toISOString(),
     documentIds: pool.map((d) => d.id),
@@ -271,6 +350,26 @@ function createHttpClient() {
     getParams: () => req("/api/admin/params"),
     setParams: (patch) => req("/api/admin/params", { method: "PUT", body: JSON.stringify(patch) }),
 
+    // candidates
+    listCandidates: () => req("/api/candidates").catch(() => mockCandidates),
+    createCandidate: (data) =>
+      req("/api/candidates", { method: "POST", body: JSON.stringify(data) }).catch(() => {
+        const ext = data.resumeFile ? "." + (data.resumeFile.name.split(".").pop() || "").toLowerCase() : ".pdf";
+        return {
+          id: uid("cand"),
+          name: data.name,
+          email: data.email || `${data.name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+          targetRole: data.targetRole,
+          resumeName: data.resumeFile ? data.resumeFile.name : `${data.name}_Resume.pdf`,
+          resumeExt: ext,
+          resumeSizeBytes: data.resumeFile?.size || 102400,
+          uploadedAt: new Date().toISOString(),
+          skills: data.skills || ["Core Skills"],
+          summary: data.summary || "Candidate profile",
+        };
+      }),
+    deleteCandidate: (id) => req(`/api/candidates/${id}`, { method: "DELETE" }).catch(() => ({ ok: true })),
+
     // documents
     listDocuments: () => req("/api/documents"),
     uploadDocument: (file) => {
@@ -306,3 +405,4 @@ const api = MODE === "real" ? createHttpClient() : createMockClient();
 
 export const apiMode = MODE;
 export default api;
+

@@ -20,47 +20,48 @@ const ALL_STEPS = [
   {
     route: "/",
     icon: LayoutDashboard,
-    title: "Your Dashboard",
+    title: "Candidate Assessment Dashboard",
     body:
-      "This is your home base. It shows how many documents are indexed, how many questions you've generated, and the split between Knowledge-Based and Skill-Based questions.",
+      "This is your command center. Add interview candidates with their resumes, track indexed enterprise documents, and manage active candidate assessments.",
   },
   {
     route: "/documents",
     icon: FileText,
-    title: "Step 1 — Upload documents",
+    title: "Step 1 — Ingest Enterprise Documents",
     body:
-      "Drag in PDF, DOCX, or TXT files. Each one is parsed, split into chunks, embedded, and indexed. Watch the progress bar until the card shows ‘indexed’. Answers are grounded only in these files.",
+      "Upload company manuals, coding guidelines, or policy files. Each file is parsed, chunked, embedded, and indexed so answers are strictly grounded in your internal knowledge base.",
   },
   {
     route: "/generate",
     icon: Sparkles,
-    title: "Step 2 — Generate Q&A",
+    title: "Step 2 — Generate Candidate Q&A",
     body:
-      "Enter a job role, choose which documents to ground answers in, and set the retrieval depth (top-k). Turn on ‘Two-round’ to generate Knowledge questions and Skill questions separately. Then click Generate.",
+      "Select an interview candidate and choose which enterprise documents to cross-reference against their profile. Click Generate to produce grounded Knowledge-Based and Skill-Based questions.",
   },
   {
     route: "/results",
     icon: ClipboardList,
-    title: "Step 3 — Review & export",
+    title: "Step 3 — Review, Filter & Export",
     body:
-      "Browse the generated questions, filter by type or out-of-scope, rate them with a thumbs up or down, and export to JSON or CSV. The percentage bar shows how strongly each answer is grounded in its source chunk.",
+      "Review questions by candidate, check grounding confidence and source chunk citations, filter by cognitive type (Knowledge vs Skill), rate questions, and export to JSON or CSV.",
   },
   {
     route: "/admin",
     icon: Shield,
     adminOnly: true,
-    title: "Admin tools",
+    title: "Admin Tools",
     body:
-      "As an admin, you can view user accounts and tune system parameters such as the default top-k, questions per set, and the answerability threshold that flags out-of-scope prompts.",
+      "As an admin, view user accounts and tune system parameters such as retrieval depth (top-k), questions per set, and the out-of-scope answerability threshold.",
   },
   {
     route: "/",
     icon: CheckCircle2,
-    title: "You're all set!",
+    title: "You're All Set!",
     body:
-      "Every answer is traceable to a source chunk, and off-topic prompts are flagged rather than made up. You can replay this tour anytime from ‘Take a tour’ at the bottom of the sidebar.",
+      "Every generated answer is traceable to an enterprise document chunk, and candidate assessments are organized for seamless interviews.",
   },
 ];
+
 
 export default function Tour() {
   const { showWelcome, active, step, setStep, start, decline, finish } = useTour();

@@ -16,11 +16,10 @@ const slug = (s) =>
   (s || "qa-set").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 export function exportJSON(set) {
-  download(
-    `${slug(set.jobRole)}.json`,
-    JSON.stringify(set, null, 2),
-    "application/json"
-  );
+  const filename = set.candidateName
+    ? `${slug(set.candidateName)}-${slug(set.jobRole)}.json`
+    : `${slug(set.jobRole)}.json`;
+  download(filename, JSON.stringify(set, null, 2), "application/json");
 }
 
 function csvCell(v) {
@@ -30,6 +29,8 @@ function csvCell(v) {
 
 export function exportCSV(set) {
   const header = [
+    "candidate_name",
+    "candidate_role",
     "job_role",
     "question",
     "answer",
@@ -40,7 +41,9 @@ export function exportCSV(set) {
   ];
   const rows = set.questions.map((q) =>
     [
-      set.jobRole,
+      set.candidateName || "",
+      set.candidateRole || set.jobRole || "",
+      set.jobRole || "",
       q.question,
       q.answer,
       q.type,
@@ -53,5 +56,9 @@ export function exportCSV(set) {
       .map(csvCell)
       .join(",")
   );
-  download(`${slug(set.jobRole)}.csv`, [header.join(","), ...rows].join("\n"), "text/csv");
+  const filename = set.candidateName
+    ? `${slug(set.candidateName)}-${slug(set.jobRole)}.csv`
+    : `${slug(set.jobRole)}.csv`;
+  download(filename, [header.join(","), ...rows].join("\n"), "text/csv");
 }
+

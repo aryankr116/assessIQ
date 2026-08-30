@@ -59,13 +59,62 @@ export const mockDocuments = [
   },
 ];
 
-// A generated Q&A set is what the RAG + classifier pipeline returns for a job-role prompt.
+export const mockCandidates = [
+  {
+    id: "cand_alex_johnson",
+    name: "Alex Johnson",
+    email: "alex.johnson@example.com",
+    targetRole: "Senior Backend Engineer",
+    resumeName: "Alex_Johnson_Backend_Resume.pdf",
+    resumeExt: ".pdf",
+    resumeSizeBytes: 124500,
+    uploadedAt: "2026-06-12T10:15:00Z",
+    skills: ["Distributed Systems", "Kubernetes", "PostgreSQL", "Go", "Python"],
+    experienceYears: 6,
+    summary:
+      "Senior backend engineer with 6+ years building microservices, blue-green deployment pipelines, and high-availability APIs.",
+  },
+  {
+    id: "cand_priya_sharma",
+    name: "Priya Sharma",
+    email: "priya.sharma@example.com",
+    targetRole: "Data Engineer",
+    resumeName: "Priya_Sharma_DataEng_CV.docx",
+    resumeExt: ".docx",
+    resumeSizeBytes: 98200,
+    uploadedAt: "2026-06-13T14:20:00Z",
+    skills: ["Apache Kafka", "Airflow", "PySpark", "Snowflake", "ETL Pipelines"],
+    experienceYears: 4,
+    summary:
+      "Data engineer experienced in streaming architectures, nightly ETL pipelines, and lag orchestration.",
+  },
+  {
+    id: "cand_marcus_vance",
+    name: "Marcus Vance",
+    email: "marcus.v@example.com",
+    targetRole: "Security Analyst",
+    resumeName: "Marcus_Vance_Security_Resume.pdf",
+    resumeExt: ".pdf",
+    resumeSizeBytes: 142000,
+    uploadedAt: "2026-06-14T09:00:00Z",
+    skills: ["RBAC", "Vulnerability Assessment", "SOC 2", "Incident Response", "Vault"],
+    experienceYears: 5,
+    summary:
+      "Cybersecurity specialist focused on enterprise identity governance, vault secret rotation, and access policies.",
+  },
+];
+
+// A generated Q&A set is what the RAG + classifier pipeline returns for a candidate & job-role prompt.
 export const mockQASets = [
   {
     id: "set_backend_engineer",
+    candidateId: "cand_alex_johnson",
+    candidateName: "Alex Johnson",
+    candidateRole: "Senior Backend Engineer",
+    candidateResumeName: "Alex_Johnson_Backend_Resume.pdf",
     jobRole: "Senior Backend Engineer",
     prompt:
-      "Generate interview questions for a Senior Backend Engineer covering deployment, reliability, and data security.",
+      "Generate interview questions for Alex Johnson (Senior Backend Engineer) covering deployment, reliability, and data security from company handbook.",
     topK: 6,
     createdAt: "2026-06-13T11:15:00Z",
     documentIds: ["doc_engineering_handbook", "doc_security_policy"],
@@ -150,9 +199,13 @@ export const mockQASets = [
   },
   {
     id: "set_data_engineer",
+    candidateId: "cand_priya_sharma",
+    candidateName: "Priya Sharma",
+    candidateRole: "Data Engineer",
+    candidateResumeName: "Priya_Sharma_DataEng_CV.docx",
     jobRole: "Data Engineer",
     prompt:
-      "Generate questions for a Data Engineer focused on the nightly ETL pipeline and on-call handling.",
+      "Generate questions for Priya Sharma (Data Engineer) focused on the nightly ETL pipeline, Kafka lag, and on-call handling.",
     topK: 5,
     createdAt: "2026-06-14T16:48:00Z",
     documentIds: ["doc_data_pipeline_runbook"],
@@ -210,11 +263,11 @@ export const mockQASets = [
   },
 ];
 
-// Aggregate stats for the dashboard (in the real backend these would be computed server-side).
-export function computeStats(documents, qaSets) {
+// Aggregate stats for the dashboard
+export function computeStats(documents = [], qaSets = [], candidates = []) {
   const indexedDocs = documents.filter((d) => d.status === "indexed");
   const totalChunks = documents.reduce((sum, d) => sum + (d.chunks || 0), 0);
-  const allQuestions = qaSets.flatMap((s) => s.questions);
+  const allQuestions = qaSets.flatMap((s) => s.questions || []);
   const knowledge = allQuestions.filter((q) => q.type === "knowledge").length;
   const skill = allQuestions.filter((q) => q.type === "skill").length;
   const unanswerable = allQuestions.filter((q) => !q.answerable).length;
@@ -222,6 +275,7 @@ export function computeStats(documents, qaSets) {
     totalDocuments: documents.length,
     indexedDocuments: indexedDocs.length,
     totalChunks,
+    totalCandidates: candidates.length,
     totalQaSets: qaSets.length,
     totalQuestions: allQuestions.length,
     knowledgeCount: knowledge,
@@ -229,3 +283,4 @@ export function computeStats(documents, qaSets) {
     unanswerableCount: unanswerable,
   };
 }
+

@@ -5,6 +5,7 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   const [documents, setDocuments] = useState([]);
+  const [candidates, setCandidates] = useState([]);
   const [qaSets, setQaSets] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -12,6 +13,12 @@ export function AppProvider({ children }) {
     const docs = await api.listDocuments();
     setDocuments(docs);
     return docs;
+  }, []);
+
+  const refreshCandidates = useCallback(async () => {
+    const cands = await api.listCandidates();
+    setCandidates(cands);
+    return cands;
   }, []);
 
   const refreshQaSets = useCallback(async () => {
@@ -24,12 +31,14 @@ export function AppProvider({ children }) {
     let active = true;
     (async () => {
       setLoading(true);
-      const [docs, sets] = await Promise.all([
+      const [docs, cands, sets] = await Promise.all([
         api.listDocuments(),
+        api.listCandidates(),
         api.listQASets(),
       ]);
       if (!active) return;
       setDocuments(docs);
+      setCandidates(cands);
       setQaSets(sets);
       setLoading(false);
     })();
@@ -64,6 +73,23 @@ export function AppProvider({ children }) {
       return refreshDocuments();
     },
     [refreshDocuments]
+  );
+
+  const createCandidate = useCallback(
+    async (data) => {
+      const cand = await api.createCandidate(data);
+      await refreshCandidates();
+      return cand;
+    },
+    [refreshCandidates]
+  );
+
+  const deleteCandidate = useCallback(
+    async (id) => {
+      await api.deleteCandidate(id);
+      return refreshCandidates();
+    },
+    [refreshCandidates]
   );
 
   const generateQA = useCallback(
@@ -105,12 +131,16 @@ export function AppProvider({ children }) {
 
   const value = {
     documents,
+    candidates,
     qaSets,
     loading,
     refreshDocuments,
+    refreshCandidates,
     refreshQaSets,
     uploadDocument,
     deleteDocument,
+    createCandidate,
+    deleteCandidate,
     generateQA,
     deleteQASet,
     rateQuestion,
