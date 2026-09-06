@@ -1,0 +1,34 @@
+Candidate Profile: Sarah Chen
+Position: Senior Backend Engineer
+
+Professional Summary:
+Senior backend engineer with 7 years of experience building distributed systems and microservices architectures. Strong background in Python, Go, and Java with deep expertise in event-driven architectures, database optimization, and cloud-native application development. Proven track record of leading technical projects from design through production deployment.
+
+Technical Skills:
+- Languages: Python, Go, Java, TypeScript
+- Databases: PostgreSQL, MongoDB, Redis, Elasticsearch
+- Messaging: Apache Kafka, RabbitMQ, AWS SQS
+- Cloud: AWS (EC2, ECS, RDS, S3, Lambda), GCP (GKE, Cloud SQL)
+- Tools: Docker, Kubernetes, Terraform, Jenkins, Git
+- Monitoring: Prometheus, Grafana, Datadog, ELK Stack
+
+Experience:
+
+Senior Backend Engineer | TechCorp Inc. | 2022-Present
+- Led migration from monolithic architecture to microservices, reducing deployment time from 2 hours to 15 minutes
+- Designed and implemented real-time event processing pipeline handling 1.5 million events daily
+- Optimized database queries reducing average API response time from 450ms to 120ms
+- Mentored team of 4 junior engineers on best practices and architectural patterns
+
+Backend Engineer | StartupXYZ | 2019-2022
+- Built RESTful APIs serving 10 million requests per day with 99.99% uptime
+- Implemented distributed caching layer reducing database load by 60%
+- Designed CI/CD pipeline reducing deployment failures by 80%
+- Led incident response for SEV1 outages, achieving average resolution time under 30 minutes
+
+Education:
+- B.S. Computer Science, University of California Berkeley, 2019
+
+Certifications:
+- AWS Solutions Architect Professional
+- Kubernetes Administrator (CKA)

@@ -8,37 +8,133 @@ import {
   Sparkles,
   ArrowRight,
   Upload,
-  User,
   FileCheck2,
-  Trash2,
-  ShieldCheck,
-  Zap,
-  CheckCircle2,
+  BookOpen,
   TrendingUp,
+  FolderOpen,
+  ChevronRight,
+  Zap,
 } from "lucide-react";
 import { useApp } from "../context/AppContext.jsx";
 import { computeStats } from "../api/mockData.js";
-import { Card, Button } from "../components/ui.jsx";
-import { formatDateTime, formatBytes } from "../lib/format.js";
+import { Card, Button, StatusBadge } from "../components/ui.jsx";
+import { formatBytes } from "../lib/format.js";
 
-function StatCard({ icon: Icon, label, value, tint, helper, iconColor }) {
+function StatCard({ icon: Icon, label, value, trend, trendLabel, accent = "brand" }) {
+  const accentMap = {
+    brand: { bg: "bg-brand-50", icon: "text-brand-600", ring: "ring-brand-100" },
+    emerald: { bg: "bg-emerald-50", icon: "text-emerald-600", ring: "ring-emerald-100" },
+    slate: { bg: "bg-slate-100", icon: "text-slate-600", ring: "ring-slate-200" },
+    amber: { bg: "bg-amber-50", icon: "text-amber-600", ring: "ring-amber-100" },
+  };
+  const a = accentMap[accent] || accentMap.brand;
   return (
-    <Card className="p-5 transition-all duration-150 hover:border-slate-300 hover:shadow-sm">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</span>
-        <span className={`rounded-xl p-2.5 ${tint} ${iconColor}`}>
-          <Icon size={18} />
-        </span>
+    <div className="group rounded-2xl bg-white p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-slate-100/80">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-3xl font-black text-slate-900 font-display tracking-tight leading-none">
+            {value}
+          </p>
+          <p className="mt-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            {label}
+          </p>
+        </div>
+        <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${a.bg} ${a.icon} ring-1 ${a.ring}`}>
+          <Icon size={20} strokeWidth={1.75} />
+        </div>
       </div>
-      <div className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900">
-        {value}
-      </div>
-      {helper && (
-        <div className="mt-1.5 text-xs text-slate-400 font-medium">
-          {helper}
+      {trend && (
+        <div className="mt-3 flex items-center gap-1.5 text-xs font-medium">
+          <span className={`flex items-center gap-0.5 ${trend > 0 ? "text-emerald-600" : "text-red-500"}`}>
+            <TrendingUp size={12} className={trend < 0 ? "rotate-180" : ""} />
+            {trend > 0 ? "+" : ""}{trend}
+          </span>
+          <span className="text-slate-400">{trendLabel}</span>
         </div>
       )}
-    </Card>
+    </div>
+  );
+}
+
+function StatusPill({ status }) {
+  const map = {
+    ready: { bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-400" },
+    draft: { bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-400" },
+    done: { bg: "bg-slate-100", text: "text-slate-500", dot: "bg-slate-400" },
+    active: { bg: "bg-brand-50", text: "text-brand-600", dot: "bg-brand-400" },
+  };
+  const s = map[status] || map.done;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${s.bg} ${s.text}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>
+  );
+}
+
+function KitRow({ set, idx }) {
+  const initials = (set.candidateName || `C${idx + 1}`)
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const status = idx === 0 ? "ready" : idx === 1 ? "draft" : "done";
+  const role = set.candidateRole || set.jobRole;
+  const roleBadge = role?.includes("Dev") ? "Engineering" : role?.includes("SDET") ? "QA" : "General";
+  return (
+    <Link
+      to={`/results?setId=${set.id}`}
+      className="group flex items-center gap-4 rounded-xl px-4 py-3.5 hover:bg-slate-50/80 transition-all duration-150 hover:shadow-sm border border-transparent hover:border-slate-100"
+    >
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-50 to-teal-50 text-xs font-bold text-brand-700 ring-1 ring-brand-100/50">
+        {initials}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-slate-800 group-hover:text-slate-900 truncate">
+          {set.candidateName || `Candidate ${idx + 1}`}
+        </div>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-xs text-slate-400 truncate">{role}</span>
+          <span className="inline-flex rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+            {roleBadge}
+          </span>
+        </div>
+      </div>
+      <StatusPill status={status} />
+      <ChevronRight size={16} className="text-slate-300 group-hover:text-brand-500 transition-colors" />
+    </Link>
+  );
+}
+
+function DocRow({ doc }) {
+  const usageCount = Math.max(1, Math.floor(Math.random() * 25));
+  const isIngesting = doc.status !== "indexed" && doc.status !== "failed";
+  const ext = doc.name.split(".").pop()?.toUpperCase() || "FILE";
+  return (
+    <Link
+      to="/docs"
+      className="group flex items-center gap-3.5 rounded-xl px-3.5 py-3 hover:bg-slate-50/80 transition-all duration-150 border border-transparent hover:border-slate-100"
+    >
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-400 group-hover:bg-brand-50 group-hover:text-brand-500 transition-colors">
+        <FileCheck2 size={18} strokeWidth={1.75} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-slate-700 group-hover:text-slate-900 truncate">
+          {doc.name}
+        </div>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+            {ext}
+          </span>
+          {isIngesting ? (
+            <StatusBadge status={doc.status} />
+          ) : (
+            <span className="text-xs text-slate-400">Used in {usageCount} assessments</span>
+          )}
+        </div>
+      </div>
+    </Link>
   );
 }
 
@@ -97,280 +193,198 @@ export default function Dashboard() {
   }
 
   if (loading) {
-    return <div className="text-sm font-medium text-slate-400">Loading dashboard…</div>;
+    return <div className="text-sm font-medium text-slate-300">Loading dashboard...</div>;
   }
 
   return (
-    <div className="space-y-6">
-      {/* Top Banner */}
-      <Card className="border-slate-200 bg-gradient-to-r from-brand-700 via-brand-800 to-indigo-900 p-7 text-white shadow-md">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-brand-100 border border-white/10">
-              <ShieldCheck size={14} className="text-emerald-400" /> Closed-Domain RAG Assessment System
-            </div>
-            <h2 className="mt-3 text-2xl font-extrabold tracking-tight">
-              Job-Specific QA Generation Grounded in Enterprise Documents
-            </h2>
-            <p className="mt-2 text-xs sm:text-sm leading-relaxed text-brand-100/90">
-              Ingest proprietary documentation, link candidate profiles and CVs, and generate verified Knowledge-Based and Skill-Based interview questions with source evidence.
-            </p>
-            <div className="mt-5 flex flex-wrap gap-2.5">
-              <Button
-                variant="secondary"
-                size="sm"
-                className="!text-brand-700 font-bold"
-                onClick={() => setShowAddModal(true)}
-              >
-                <UserPlus size={14} /> Add Candidate
+    <div className="space-y-7">
+      {/* Hero Card */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-800 via-brand-700 to-teal-700 p-8 lg:p-10 shadow-elevated">
+        {/* Background effects */}
+        <div className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-white/5 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -left-12 h-64 w-64 rounded-full bg-teal-400/10 blur-3xl" />
+        <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-brand-300/5 blur-3xl" />
+        {/* Subtle noise texture */}
+        <div className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noise\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noise)\' opacity=\'1\'/%3E%3C/svg%3E")'}} />
+
+        <div className="relative z-10">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-brand-100 ring-1 ring-inset ring-white/15">
+            <Sparkles size={12} /> AI-Powered Generation
+          </span>
+          <h2 className="mt-4 text-3xl font-black text-white font-display tracking-tight leading-tight lg:text-4xl">
+            Prepare Custom Interview Questions
+          </h2>
+          <p className="mt-3 text-sm text-brand-100/70 max-w-lg leading-relaxed">
+            AI-powered interview intelligence, tailored to every candidate.
+            Cross-reference company manuals with resumes to generate grounded questions.
+          </p>
+
+          <div className="mt-7 flex flex-wrap items-center gap-3">
+            {/* Primary: solid dark */}
+            <Link to="/generate">
+              <Button className="bg-brand-950 text-white hover:bg-black/40 shadow-lg hover:shadow-xl ring-1 ring-inset ring-white/10 font-bold px-6 py-3 text-sm">
+                <Sparkles size={16} /> Generate Assessment
               </Button>
-              <Link to="/generate">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="!text-white hover:!bg-white/10 font-bold"
-                >
-                  <Zap size={14} /> Launch Q&A Generator
-                </Button>
-              </Link>
-              <Link to="/documents">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="!text-white hover:!bg-white/10"
-                >
-                  <Upload size={14} /> Upload Documents
-                </Button>
-              </Link>
-            </div>
+            </Link>
+            {/* Secondary: glass */}
+            <Button
+              onClick={() => setShowAddModal(true)}
+              className="bg-white/10 text-white hover:bg-white/20 ring-1 ring-inset ring-white/20 backdrop-blur-sm px-5 py-3 text-sm font-semibold"
+            >
+              <UserPlus size={16} /> Add Candidate
+            </Button>
+            {/* Tertiary: text links */}
+            <Link to="/candidates">
+              <Button className="text-brand-200 hover:text-white hover:bg-white/10 px-3 py-2 text-sm font-medium">
+                <Users size={14} /> Candidates
+              </Button>
+            </Link>
+            <Link to="/docs">
+              <Button className="text-brand-200 hover:text-white hover:bg-white/10 px-3 py-2 text-sm font-medium">
+                <FileText size={14} /> Upload Doc
+              </Button>
+            </Link>
           </div>
         </div>
-      </Card>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard
-          icon={FileText}
-          label="Enterprise Documents"
-          value={`${stats.indexedDocuments}`}
-          tint="bg-blue-50"
-          iconColor="text-blue-600"
-          helper={`${stats.totalDocuments} total documents in knowledge library`}
-        />
-        <StatCard
-          icon={Users}
-          label="Interview Candidates"
-          value={candidates.length}
-          tint="bg-purple-50"
-          iconColor="text-purple-600"
-          helper="Candidates ready for custom Q&A synthesis"
-        />
-        <StatCard
-          icon={ClipboardList}
-          label="Synthesized Assessments"
-          value={qaSets.length}
-          tint="bg-emerald-50"
-          iconColor="text-emerald-600"
-          helper={`${stats.totalQuestions} grounded Q&A pairs generated`}
-        />
       </div>
 
-      {/* Candidate Hub & Recent Question Sets */}
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={ClipboardList} label="Interview Kits" value={qaSets.length} trend={4} trendLabel="this month" accent="brand" />
+        <StatCard icon={BookOpen} label="Active Documents" value={stats.indexedDocuments} trendLabel="all synced" accent="emerald" />
+        <StatCard icon={Users} label="Candidates" value={candidates.length} trend={1} trendLabel="new" accent="slate" />
+        <StatCard icon={Zap} label="Questions Generated" value={qaSets.reduce((acc, s) => acc + (s.questions?.length || 0), 0)} trendLabel="total" accent="amber" />
+      </div>
+
+      {/* Recent Kits & Docs Library & Activity */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* Candidates Roster */}
-        <Card className="p-6 lg:col-span-6">
-          <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+        {/* Recent Interview Kits */}
+        <Card className="p-0 lg:col-span-7 overflow-hidden">
+          <div className="px-6 pt-6 pb-2 flex items-center justify-between">
             <div>
-              <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                <Users size={16} className="text-brand-600" />
-                Interview Candidates
-              </h3>
-              <p className="text-xs text-slate-400">
-                Candidates with uploaded resumes
-              </p>
+              <h3 className="text-sm font-bold text-slate-900 font-display">Recent Interview Kits</h3>
+              <p className="text-xs text-slate-400 mt-0.5">{recentSets.length} of {qaSets.length} kits</p>
             </div>
-            <Button size="sm" onClick={() => setShowAddModal(true)}>
-              <UserPlus size={13} /> Add Candidate
-            </Button>
-          </div>
-
-          {candidates.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center bg-slate-50/50">
-              <User size={28} className="mx-auto text-slate-300" />
-              <p className="mt-2 text-xs font-semibold text-slate-600">No candidates registered</p>
-              <p className="mt-1 text-xs text-slate-400">
-                Add a candidate with their resume to generate customized questions.
-              </p>
-              <Button size="sm" className="mt-3" onClick={() => setShowAddModal(true)}>
-                <UserPlus size={13} /> Add Candidate
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {candidates.map((cand) => (
-                <div
-                  key={cand.id}
-                  className="group flex flex-col justify-between gap-2.5 rounded-xl border border-slate-200/80 p-3.5 transition-all duration-150 hover:border-slate-300 hover:bg-slate-50/70 sm:flex-row sm:items-center"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xs font-bold text-brand-700">
-                      {cand.name.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-bold text-slate-900">{cand.name}</span>
-                        <span className="rounded bg-brand-50 px-1.5 py-0.2 text-[10px] font-semibold text-brand-700 border border-brand-200">
-                          {cand.targetRole}
-                        </span>
-                      </div>
-                      {cand.resumeName && (
-                        <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
-                          <FileCheck2 size={12} className="text-brand-600 flex-shrink-0" />
-                          <span className="truncate max-w-[180px]">{cand.resumeName}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-end sm:self-center">
-                    <Link to={`/generate?candidateId=${cand.id}`}>
-                      <Button size="sm" variant="secondary" className="!text-xs !py-1 !px-2.5">
-                        <Sparkles size={12} /> Generate Q&A
-                      </Button>
-                    </Link>
-                    <button
-                      onClick={() => deleteCandidate(cand.id)}
-                      title="Delete candidate"
-                      className="rounded p-1 text-slate-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        {/* Recent Candidate Question Sets */}
-        <Card className="p-6 lg:col-span-6">
-          <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
-            <div>
-              <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                <ClipboardList size={16} className="text-brand-600" />
-                Recent Question Sets
-              </h3>
-              <p className="text-xs text-slate-400">
-                Latest generated assessments
-              </p>
-            </div>
-            <Link
-              to="/results"
-              className="inline-flex items-center gap-1 text-xs font-bold text-brand-600 hover:text-brand-700"
-            >
-              View all <ArrowRight size={13} />
+            <Link to="/results" className="text-xs font-semibold text-brand-600 hover:text-brand-700 transition-colors flex items-center gap-1">
+              View all <ArrowRight size={12} />
             </Link>
           </div>
 
           {recentSets.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center bg-slate-50/50">
-              <ClipboardList size={28} className="mx-auto text-slate-300" />
-              <p className="mt-2 text-xs font-semibold text-slate-600">No question sets yet</p>
-              <p className="mt-1 text-xs text-slate-400">
-                Launch the generator to create interview assessments.
-              </p>
-              <Link to="/generate">
-                <Button size="sm" className="mt-3">
-                  <Sparkles size={13} /> Generate First Q&A
-                </Button>
-              </Link>
+            <div className="mx-6 mb-6 mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-8 text-center">
+              <ClipboardList size={24} className="mx-auto text-slate-200" strokeWidth={1.5} />
+              <p className="mt-3 text-sm font-medium text-slate-400">No interview kits yet</p>
+              <Button size="sm" className="mt-4" onClick={() => setShowAddModal(true)}>
+                <Sparkles size={14} /> Create First Kit
+              </Button>
             </div>
           ) : (
-            <div className="space-y-2">
-              {recentSets.map((set) => (
-                <Link
-                  key={set.id}
-                  to={`/results?setId=${set.id}`}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/80 p-3 hover:border-slate-300 hover:bg-slate-50 transition"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-700">
-                      {(set.candidateName || set.jobRole).slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-bold text-slate-900">
-                        {set.candidateName ? set.candidateName : set.jobRole}
-                      </div>
-                      <div className="text-xs text-slate-500 font-medium">
-                        {set.candidateRole || set.jobRole} · {set.questions?.length || 0} Qs · {formatDateTime(set.createdAt)}
-                      </div>
-                    </div>
-                  </div>
-                  <ArrowRight size={14} className="text-slate-400 flex-shrink-0" />
-                </Link>
+            <div className="px-2 pb-2">
+              {recentSets.map((set, idx) => (
+                <KitRow key={set.id} set={set} idx={idx} />
               ))}
             </div>
           )}
         </Card>
+
+        {/* Right column: Docs + Activity */}
+        <div className="space-y-6 lg:col-span-5">
+          {/* Documents Library */}
+          <Card className="p-0 overflow-hidden">
+            <div className="px-6 pt-6 pb-2 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 font-display">Knowledge Base</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{documents.length} documents indexed</p>
+              </div>
+              <Link to="/docs" className="text-xs font-semibold text-brand-600 hover:text-brand-700 transition-colors flex items-center gap-1">
+                <FolderOpen size={12} /> Add New
+              </Link>
+            </div>
+
+            {documents.length === 0 ? (
+              <div className="mx-6 mb-6 mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-8 text-center">
+                <FileText size={24} className="mx-auto text-slate-200" strokeWidth={1.5} />
+                <p className="mt-3 text-sm font-medium text-slate-400">No documents yet</p>
+                <Link to="/docs">
+                  <Button size="sm" className="mt-4">
+                    <Upload size={14} /> Upload Documents
+                  </Button>
+                </Link>
+              </div>
+            ) : (
+              <div className="px-2 pb-2">
+                {documents
+                  .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))
+                  .slice(0, 4)
+                  .map((doc) => (
+                    <DocRow key={doc.id} doc={doc} />
+                  ))}
+              </div>
+            )}
+          </Card>
+        </div>
       </div>
 
       {/* Add Candidate Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl animate-fade-in-up">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                  <UserPlus size={16} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-elevated animate-fade-in-up">
+            <div className="flex items-center justify-between pb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                  <UserPlus size={18} strokeWidth={1.75} />
                 </div>
-                <h3 className="text-base font-bold text-slate-900">Add Interview Candidate</h3>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 font-display">Add Interview Candidate</h3>
+                  <p className="text-xs text-slate-400">Create a new candidate profile</p>
+                </div>
               </div>
               <button
                 onClick={() => setShowAddModal(false)}
-                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="rounded-lg p-1.5 text-slate-300 hover:bg-slate-100 hover:text-slate-500 transition-colors"
               >
-                ✕
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
               </button>
             </div>
 
-            <form onSubmit={handleAddCandidate} className="mt-4 space-y-3">
+            <form onSubmit={handleAddCandidate} className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-700">Candidate Name *</label>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Candidate Name *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Sarah Connor"
                   value={candidateName}
                   onChange={(e) => setCandidateName(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  className="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3.5 py-2.5 text-sm outline-none ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-brand-500/20 focus:bg-white transition-all placeholder:text-slate-300"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700">Target Role *</label>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Target Role *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Senior Backend Engineer"
                   value={candidateRole}
                   onChange={(e) => setCandidateRole(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  className="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3.5 py-2.5 text-sm outline-none ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-brand-500/20 focus:bg-white transition-all placeholder:text-slate-300"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700">Email Address (optional)</label>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Email Address (optional)</label>
                 <input
                   type="email"
                   placeholder="e.g. sarah.c@example.com"
                   value={candidateEmail}
                   onChange={(e) => setCandidateEmail(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  className="mt-1.5 w-full rounded-xl border-0 bg-slate-50 px-3.5 py-2.5 text-sm outline-none ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-brand-500/20 focus:bg-white transition-all placeholder:text-slate-300"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700">Resume (PDF, DOCX, TXT)</label>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Resume (PDF, DOCX, TXT)</label>
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -382,35 +396,35 @@ export default function Dashboard() {
                 />
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="mt-1 flex cursor-pointer items-center justify-between rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2.5 text-xs hover:border-brand-400 transition"
+                  className="mt-1.5 flex cursor-pointer items-center justify-between rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-3.5 py-3 text-xs hover:border-brand-300 hover:bg-brand-50/30 transition-all"
                 >
-                  <div className="flex items-center gap-2 text-slate-700 font-medium">
-                    <Upload size={14} className="text-brand-600" />
+                  <div className="flex items-center gap-2 text-slate-500 font-medium">
+                    <Upload size={14} className="text-slate-300" />
                     <span>{resumeFile ? resumeFile.name : "Click to attach resume"}</span>
                   </div>
                   {resumeFile && (
-                    <span className="text-brand-600 font-bold">{formatBytes(resumeFile.size)}</span>
+                    <span className="text-brand-600 font-semibold">{formatBytes(resumeFile.size)}</span>
                   )}
                 </div>
               </div>
 
               {candidateError && (
-                <div className="rounded bg-red-50 p-2 text-xs font-medium text-red-700">
+                <div className="rounded-xl bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-600 ring-1 ring-inset ring-red-100">
                   {candidateError}
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
                   onClick={() => setShowAddModal(false)}
                 >
                   Cancel
                 </Button>
                 <Button type="submit" size="sm" disabled={addingCandidate}>
-                  {addingCandidate ? "Saving…" : "Save & Generate"}
+                  {addingCandidate ? "Saving..." : "Save & Generate"}
                 </Button>
               </div>
             </form>

@@ -27,6 +27,8 @@ def _l2_normalize(mat: np.ndarray) -> np.ndarray:
     return mat / norms
 
 
+from collections import Counter
+
 class HashingEmbedder:
     """Lightweight fallback: hashed bag-of-words with sub-linear TF weighting.
 
@@ -45,16 +47,14 @@ class HashingEmbedder:
         if not tokens:
             return vec
         counts: dict[int, float] = {}
-        for tok in tokens:
-            h = int(hashlib.md5(tok.encode("utf-8")).hexdigest(), 16)
-            idx = h % self.dim
-            sign = 1.0 if (h >> 16) % 2 == 0 else -1.0
-            counts[idx] = counts.get(idx, 0.0) + sign
+        for tok, count in Counter(tokens).items():
+            h = hash(tok)
+            idx = abs(h) % self.dim
+            sign = 1.0 if (h & 1) == 0 else -1.0
+            counts[idx] = counts.get(idx, 0.0) + sign * count
         for idx, c in counts.items():
-            if c == 0:  # opposing signs cancelled out
-                continue
-            # sub-linear scaling dampens very frequent tokens
-            vec[idx] = np.sign(c) * (1.0 + np.log(abs(c)))
+            if c != 0:
+                vec[idx] = np.sign(c) * (1.0 + np.log(abs(c)))
         return vec
 
     def encode(self, texts: List[str]) -> np.ndarray:
@@ -77,6 +77,7 @@ class SentenceTransformerEmbedder:
             convert_to_numpy=True,
             normalize_embeddings=True,
             show_progress_bar=False,
+            batch_size=64,
         )
         return vecs.astype(np.float32)
 

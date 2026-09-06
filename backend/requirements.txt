@@ -16,7 +16,7 @@ easyocr
 # to a lightweight hashing embedder automatically.
 sentence-transformers
 faiss-cpu
-chroma-db
+chromadb
 numpy
 
 # --- API server -----------------------------------------------------------
@@ -34,3 +34,4 @@ alembic                 # database migrations
 openai                  # default provider (OpenAI / OpenAI-compatible)
 requests                # used by the Ollama provider
 python-dotenv           # loads .env automatically
+google-auth>=2.0

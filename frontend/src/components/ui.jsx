@@ -4,7 +4,7 @@ import { BrainCircuit, Wrench, AlertTriangle } from "lucide-react";
 export function Card({ className = "", children, ...props }) {
   return (
     <div
-      className={`rounded-xl border border-slate-200 bg-white shadow-sm ${className}`}
+      className={`rounded-2xl bg-white shadow-card transition-shadow duration-200 hover:shadow-card-hover ${className}`}
       {...props}
     >
       {children}
@@ -21,20 +21,22 @@ export function Button({
 }) {
   const variants = {
     primary:
-      "bg-brand-600 text-white hover:bg-brand-700 disabled:bg-brand-300 shadow-sm",
+      "bg-brand-600 text-white hover:bg-brand-700 disabled:bg-brand-300 shadow-sm hover:shadow-md",
     secondary:
-      "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 disabled:opacity-60",
-    ghost: "text-slate-600 hover:bg-slate-100",
-    danger: "text-red-600 hover:bg-red-50 border border-transparent",
+      "bg-white text-slate-500 ring-1 ring-inset ring-sand-200 hover:bg-slate-50 hover:ring-sand-300 disabled:opacity-60",
+    ghost: "text-slate-500 hover:bg-slate-100 hover:text-slate-700",
+    danger: "text-red-600 hover:bg-red-50 ring-1 ring-inset ring-transparent hover:ring-red-200",
+    gradient:
+      "bg-gradient-to-r from-brand-600 to-teal-700 text-white hover:from-brand-700 hover:to-teal-800 disabled:opacity-60 shadow-sm hover:shadow-md",
   };
   const sizes = {
     sm: "px-2.5 py-1.5 text-xs",
-    md: "px-3.5 py-2 text-sm",
+    md: "px-4 py-2 text-sm",
     lg: "px-5 py-2.5 text-sm",
   };
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-150 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     >
       {children}
@@ -42,13 +44,12 @@ export function Button({
   );
 }
 
-// Knowledge vs Skill tag — the core classification output of the system.
 export function TypeBadge({ type, size = "md" }) {
   const isKnowledge = type === "knowledge";
   const Icon = isKnowledge ? BrainCircuit : Wrench;
   const cls = isKnowledge
-    ? "bg-blue-50 text-blue-700 ring-blue-200"
-    : "bg-purple-50 text-purple-700 ring-purple-200";
+    ? "bg-brand-50 text-brand-700 ring-brand-100"
+    : "bg-sand-100 text-sand-700 ring-sand-200";
   const pad = size === "sm" ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs";
   return (
     <span
@@ -62,32 +63,44 @@ export function TypeBadge({ type, size = "md" }) {
 
 export function StatusBadge({ status }) {
   const map = {
-    indexed: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-    chunking: "bg-amber-50 text-amber-700 ring-amber-200",
-    extracting: "bg-amber-50 text-amber-700 ring-amber-200",
-    uploaded: "bg-slate-100 text-slate-600 ring-slate-200",
-    failed: "bg-red-50 text-red-700 ring-red-200",
+    indexed: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    chunking: "bg-amber-50 text-amber-700 ring-amber-100",
+    extracting: "bg-brand-50 text-brand-700 ring-brand-100",
+    uploading: "bg-sky-50 text-sky-700 ring-sky-100",
+    embedding: "bg-purple-50 text-purple-700 ring-purple-100",
+    indexing: "bg-cyan-50 text-cyan-700 ring-cyan-100",
+    processing: "bg-amber-50 text-amber-700 ring-amber-100",
+    uploaded: "bg-sand-100 text-sand-500 ring-sand-200",
+    failed: "bg-red-50 text-red-600 ring-red-100",
   };
   const label = {
     indexed: "Indexed",
     chunking: "Chunking",
     extracting: "Extracting",
+    uploading: "Uploading",
+    embedding: "Embedding",
+    indexing: "Indexing",
+    processing: "Processing",
     uploaded: "Uploaded",
     failed: "Failed",
   };
-  const animate = status === "chunking" || status === "extracting";
+  const dotColor = {
+    indexed: "bg-emerald-500",
+    failed: "bg-red-500",
+    uploading: "bg-sky-500",
+    extracting: "bg-brand-500",
+    embedding: "bg-purple-500",
+    indexing: "bg-cyan-500",
+    chunking: "bg-amber-500",
+    processing: "bg-amber-500",
+  };
+  const animate = status !== "indexed" && status !== "failed" && status !== "uploaded";
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${map[status] || map.uploaded}`}
     >
       <span
-        className={`h-1.5 w-1.5 rounded-full ${
-          status === "indexed"
-            ? "bg-emerald-500"
-            : status === "failed"
-            ? "bg-red-500"
-            : "bg-amber-500"
-        } ${animate ? "animate-pulse" : ""}`}
+        className={`h-1.5 w-1.5 rounded-full ${dotColor[status] || "bg-amber-500"} ${animate ? "animate-pulse" : ""}`}
       />
       {label[status] || status}
     </span>
@@ -95,22 +108,12 @@ export function StatusBadge({ status }) {
 }
 
 export function ConfidenceBar({ value }) {
-  const pct = Math.round((value || 0) * 100);
-  const color =
-    pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
-  return (
-    <div className="flex items-center gap-2" title={`Grounding confidence ${pct}%`}>
-      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
-        <div className={`h-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs tabular-nums text-slate-500">{pct}%</span>
-    </div>
-  );
+  return null;
 }
 
 export function UnanswerablePill() {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 ring-1 ring-inset ring-red-100">
       <AlertTriangle size={13} />
       Out of scope
     </span>
@@ -119,15 +122,15 @@ export function UnanswerablePill() {
 
 export function EmptyState({ icon: Icon, title, children, action }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-sand-200 bg-sand-50/50 px-6 py-16 text-center">
       {Icon && (
-        <div className="mb-4 rounded-full bg-brand-50 p-3 text-brand-600">
-          <Icon size={26} />
+        <div className="mb-4 rounded-2xl bg-brand-50 p-3 text-brand-500">
+          <Icon size={26} strokeWidth={1.5} />
         </div>
       )}
       <h3 className="text-base font-semibold text-slate-800">{title}</h3>
       {children && (
-        <p className="mt-1 max-w-sm text-sm text-slate-500">{children}</p>
+        <p className="mt-1 max-w-sm text-sm text-slate-400">{children}</p>
       )}
       {action && <div className="mt-5">{action}</div>}
     </div>

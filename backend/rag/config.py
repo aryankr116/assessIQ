@@ -12,10 +12,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # Load a .env file if python-dotenv is available (optional dependency).
+# Resolve the project root (parent of this package) so the same .env works no
+# matter which directory the server is launched from.
 try:  # pragma: no cover - convenience only
     from dotenv import load_dotenv
 
-    load_dotenv()
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    load_dotenv(_PROJECT_ROOT / ".env")
+    load_dotenv(_PROJECT_ROOT / "backend" / ".env")
 except Exception:
     pass
 
@@ -108,6 +112,13 @@ class Settings:
     # Seed admin created on first run if no users exist.
     seed_admin_user: str = os.getenv("ASSESSIQ_ADMIN_USER", "admin")
     seed_admin_password: str = os.getenv("ASSESSIQ_ADMIN_PASSWORD", "admin123")
+
+    # SMTP settings for sending emails (e.g. password resets)
+    smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user: str = os.getenv("SMTP_USER", "")
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+    smtp_from_name: str = os.getenv("SMTP_FROM_NAME", "AssessIQ")
 
     def resolved_provider(self) -> str:
         """Fall back to the offline provider if the chosen one isn't usable,

@@ -1,0 +1,52 @@
+Data Pipeline Runbook v2.4
+Owner: Data Engineering Team
+
+1. ETL Job Architecture
+
+The data pipeline processes approximately 2.3 million events daily through a series of extraction, transformation, and loading stages. The pipeline runs on Apache Airflow with the following DAG schedule:
+
+- raw_events_extract: Runs every 15 minutes, extracts raw event data from Kafka topics
+- transform_clean: Depends on extract, applies data cleaning and normalization
+- enrichAggregate: Depends on transform, joins with reference data and computes aggregates
+- load_warehouse: Depends on enrich, loads final data into the analytics warehouse
+- quality_check: Runs after load, validates data integrity and completeness
+
+2. Kafka Topic Management
+
+Event producers publish to topics following the naming convention: {domain}.{event_type}.{version}
+
+Consumer groups are configured with:
+- Session timeout: 30 seconds
+- Heartbeat interval: 10 seconds
+- Max poll interval: 300 seconds
+- Auto offset reset: earliest
+
+Topic retention is set to 7 days for standard topics and 30 days for compliance topics. Partitions are sized to maintain under 1000 messages per partition per second.
+
+3. Data Quality Framework
+
+Automated data quality checks run at each stage of the pipeline:
+
+Schema validation: Verifies incoming data matches the expected Avro schema. Mismatches are routed to a dead-letter queue for manual review.
+
+Completeness checks: Ensures required fields are present and non-null. Missing data triggers a warning alert when completeness drops below 95%.
+
+Freshness monitoring: Alerts when data arrives more than 15 minutes behind the expected schedule. Stale data triggers an automatic pipeline restart after 3 consecutive failures.
+
+4. Error Handling & Recovery
+
+Failed records are routed to a dead-letter queue (DLQ) with the original message, error details, and timestamp. DLQ messages are reviewed daily by the data engineering team.
+
+Pipeline failures trigger automatic retries with exponential backoff: 1 minute, 5 minutes, 15 minutes, 60 minutes. After 4 failed retries, an alert is sent to the on-call data engineer.
+
+5. Scaling Guidelines
+
+The pipeline auto-scales based on Kafka consumer lag. When lag exceeds 10,000 messages per partition, additional consumer instances are spun up automatically.
+
+Peak load periods (end-of-day batch processing, monthly reporting) require pre-scaling 2 hours before the expected surge. The capacity planning dashboard shows historical load patterns.
+
+6. Disaster Recovery
+
+The pipeline state is stored in PostgreSQL with automated backups every 6 hours. In case of catastrophic failure, the pipeline can be restored from the most recent backup with a maximum data loss window of 6 hours.
+
+Cross-region replication is enabled for critical topics. Failover to the secondary region can be initiated manually through the operations dashboard.

@@ -70,11 +70,16 @@ function createMockClient() {
       if (!u) throw new Error("Invalid username or password");
       return { token: mockToken(u), user: pub(u) };
     },
-    async register(username, password) {
+    async register(username, password, email) {
       await delay(250);
       if (users.find((x) => x.username === username)) throw new Error("Username already exists");
-      const u = { username, password, role: "recruiter" };
+      const u = { username, password, role: "recruiter", email: email || "" };
       users = [...users, u];
+      return { token: mockToken(u), user: pub(u) };
+    },
+    async googleLogin(credential) {
+      await delay(250);
+      const u = users.find((x) => x.username === "admin");
       return { token: mockToken(u), user: pub(u) };
     },
     async me() {
@@ -125,6 +130,18 @@ function createMockClient() {
       await delay(150);
       candidates = candidates.filter((c) => c.id !== id);
       return { ok: true };
+    },
+    async updateCandidate(id, data) {
+      await delay(200);
+      const idx = candidates.findIndex((c) => c.id === id);
+      if (idx >= 0) {
+        if (data.name) candidates[idx].name = data.name;
+        if (data.targetRole) candidates[idx].targetRole = data.targetRole;
+        if (data.email !== undefined) candidates[idx].email = data.email;
+        if (data.summary !== undefined) candidates[idx].summary = data.summary;
+        if (data.resumeFile) candidates[idx].resumeName = data.resumeFile.name;
+      }
+      return { ...candidates[idx] };
     },
 
     // -- documents --
@@ -249,34 +266,62 @@ function synthesizeQASet({
   const selected = documents.filter((d) => documentIds.includes(d.id) && d.status === "indexed");
   const pool = selected.length ? selected : documents.filter((d) => d.status === "indexed");
 
-  const mk = (d, type, i) => ({
-    id: `q${i}`,
-    question:
+  const extractTopic = (docName, text) => {
+    const cleanName = docName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+    if (cleanName.length > 3) return cleanName;
+    const snippet = (text || "").replace(/^[#\*\-\d\.\s]+/, "").trim();
+    const words = snippet.split(/\s+/).slice(0, 6).join(" ");
+    return words || "core system architecture";
+  };
+
+  const knowledgeTemplates = [
+    (topic, role) => `What are the fundamental architectural principles, design trade-offs, and scalability bottlenecks associated with ${topic} when building systems for a ${role}?`,
+    (topic, role) => `When evaluating ${topic} in an enterprise pipeline, what key reliability standards and fault-tolerance mechanisms should be enforced?`,
+    (topic, role) => `How would you explain the underlying operational mechanics of ${topic}, and what security controls should be established for a ${role}?`,
+    (topic, role) => `What design patterns and concurrency trade-offs apply when implementing ${topic} in high-throughput microservices?`,
+  ];
+
+  const skillTemplates = [
+    (topic, role, name) => `Suppose ${name} encounters a critical latency spike or thread deadlock involving ${topic} in production. What step-by-step troubleshooting protocol should be followed to resolve it?`,
+    (topic, role, name) => `How would you design a zero-downtime deployment and automated rollback strategy for a service heavily reliant on ${topic}?`,
+    (topic, role, name) => `If ${name} is tasked with refactoring a legacy service into asynchronous event-driven workers using ${topic}, what API contracts and retry mechanisms should be implemented?`,
+    (topic, role, name) => `In a high-concurrency environment where message delivery or cache keys fail, how would you configure ${topic} to ensure eventual consistency and zero data loss?`,
+  ];
+
+  const mk = (d, type, i) => {
+    const topic = extractTopic(d.name, d.excerpt);
+    const qText =
       type === "knowledge"
-        ? `According to ${d.name}, what are the core architectural policies and guidelines expected of a ${finalRole}?`
-        : `Cross-referencing ${finalCandidateName}'s profile with ${d.name}, how should they address the system reliability and operational requirements in practice?`,
-    answer:
+        ? knowledgeTemplates[i % knowledgeTemplates.length](topic, finalRole)
+        : skillTemplates[i % skillTemplates.length](topic, finalRole, finalCandidateName);
+
+    const aText =
       type === "knowledge"
-        ? `Based strictly on ${d.name}: ${d.excerpt || "The documented standard mandates strict operational compliance and automated verification."}`
-        : `A grounded solution tailored for ${finalCandidateName} directly adheres to the engineering standard documented in ${d.name}.`,
-    type,
-    confidence: Number((0.74 + Math.random() * 0.23).toFixed(2)),
-    answerable: true,
-    rating: null,
-    sources: [
-      {
-        docId: d.id,
-        docName: d.name,
-        chunkId: Math.floor(Math.random() * (d.chunks || 30)) + 1,
-        snippet: (d.excerpt || "Indexed enterprise documentation passage.").slice(0, 140) + "…",
-      },
-    ],
-  });
+        ? `Core Technical Solution:\nThe enterprise standard for ${topic} specifies strict operational compliance, resource boundaries, and verified architectural patterns. ${d.excerpt || ""}\n\nKey Evaluation Criteria for Interviewer:\n• Candidate must explain architectural trade-offs, state management, and memory limits for ${topic}.\n• Candidate should specify security controls, authorization standards, and compliance verification.\n• Candidate must articulate performance metrics and high-availability SLAs for a ${finalRole}.`
+        : `Core Technical Solution:\nWhen handling ${topic} as a ${finalRole}, the candidate should implement automated health checks, idempotency keys, explicit circuit breakers, and trace header propagation.\n\nKey Evaluation Criteria for Interviewer:\n• Candidate must outline a step-by-step diagnostic workflow for troubleshooting latency spikes or failure modes.\n• Candidate should describe zero-downtime deployment and automated rollback strategies.\n• Candidate should articulate retry backoff logic and eventual consistency guarantees.`;
+
+    return {
+      id: `q${i}`,
+      question: qText,
+      answer: aText,
+      type,
+      confidence: Number((0.78 + Math.random() * 0.19).toFixed(2)),
+      answerable: true,
+      rating: null,
+      sources: [
+        {
+          docId: d.id,
+          docName: d.name,
+          chunkId: Math.floor(Math.random() * (d.chunks || 30)) + 1,
+          snippet: (d.excerpt || "Indexed enterprise documentation passage.").slice(0, 140) + "…",
+        },
+      ],
+    };
+  };
 
   let questions = [];
   const limit = Math.max(2, Math.min(topK || 6, (pool.length || 1) * 2));
   if (twoRound) {
-    // Knowledge round, then Skill round.
     pool.forEach((d) => questions.push(mk(d, "knowledge", questions.length + 1)));
     pool.forEach((d) => questions.push(mk(d, "skill", questions.length + 1)));
   } else {
@@ -343,8 +388,16 @@ function createHttpClient() {
     // auth
     login: (username, password) =>
       req("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
-    register: (username, password) =>
-      req("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password }) }),
+    register: (username, password, email) =>
+      req("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, email }) }),
+    googleLogin: (credential) =>
+      req("/api/auth/google", { method: "POST", body: JSON.stringify({ credential }) }),
+    forgotPassword: (email) =>
+      req("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
+    changePassword: (currentPassword, newPassword) =>
+      req("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
+    updateProfile: (username, email) =>
+      req("/api/auth/update-profile", { method: "POST", body: JSON.stringify({ username, email }) }),
     me: () => req("/api/auth/me"),
     listUsers: () => req("/api/admin/users"),
     getParams: () => req("/api/admin/params"),
@@ -369,6 +422,23 @@ function createHttpClient() {
         };
       }),
     deleteCandidate: (id) => req(`/api/candidates/${id}`, { method: "DELETE" }).catch(() => ({ ok: true })),
+    updateCandidate: (id, data) => {
+      const form = new FormData();
+      if (data.name) form.append("name", data.name);
+      if (data.targetRole) form.append("targetRole", data.targetRole);
+      if (data.email !== undefined) form.append("email", data.email);
+      if (data.summary !== undefined) form.append("summary", data.summary);
+      if (data.resumeFile) form.append("resume", data.resumeFile);
+      const token = tokenStore.get();
+      return fetch(`${BASE_URL}/api/candidates/${id}`, {
+        method: "PUT",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      }).then((r) => {
+        if (!r.ok) throw new Error(`Update failed: ${r.status}`);
+        return r.json();
+      });
+    },
 
     // documents
     listDocuments: () => req("/api/documents"),
@@ -386,6 +456,7 @@ function createHttpClient() {
       });
     },
     deleteDocument: (id) => req(`/api/documents/${id}`, { method: "DELETE" }).then(() => ({ ok: true })),
+    getDocChunks: (docId) => req(`/api/documents/${docId}/chunks`),
 
     // qa sets
     listQASets: () => req("/api/qa-sets"),
@@ -404,5 +475,6 @@ function createHttpClient() {
 const api = MODE === "real" ? createHttpClient() : createMockClient();
 
 export const apiMode = MODE;
+export const apiBaseUrl = BASE_URL;
 export default api;
 

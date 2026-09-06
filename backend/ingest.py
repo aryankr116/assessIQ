@@ -17,18 +17,22 @@ from typing import List
 from backend.text_extractor.extractors import extract_text_from_file, file_metadata
 
 
+STRUCT_RE = re.compile(r"^(?:#{1,6}\s+|[-*•+]\s+|\d+[\.)]\s+)")
+TABLE_RE = re.compile(r"\w\s*\|\s*\w")
+
 def _is_structural_line(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return False
-
-    if re.match(r"^(#{1,6}\s+|[-*•+]\s+|\d+[\.)]\s+)", stripped):
-        return True
-    if "|" in line and re.search(r"\w\s*\|\s*\w", line):
+    c0 = stripped[0]
+    if c0 in "#-*•+0123456789":
+        if STRUCT_RE.match(stripped):
+            return True
+    if "|" in line and TABLE_RE.search(line):
         return True
     if stripped.endswith(":"):
         return True
-    if stripped.isupper() and len(stripped) > 3 and sum(c.isalpha() for c in stripped) / max(len(stripped), 1) > 0.6:
+    if len(stripped) > 3 and stripped.isupper():
         return True
     return False
 
@@ -39,18 +43,31 @@ def clean_text(text: str) -> str:
     text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", "", text)
 
     lines = [line.rstrip() for line in text.split("\n")]
+    if not lines:
+        return ""
+
+    # Pre-compute structural status for all lines in a single fast pass
+    is_struct = [_is_structural_line(l) for l in lines]
+    has_text = [bool(l.strip()) for l in lines]
+
     merged_lines: List[str] = []
-    for idx, line in enumerate(lines):
-        if not line.strip():
+    n_lines = len(lines)
+
+    for idx in range(n_lines):
+        line = lines[idx]
+        if not has_text[idx]:
             merged_lines.append("")
             continue
 
-        next_line = lines[idx + 1] if idx + 1 < len(lines) else ""
-        if line.endswith("-") and next_line and not _is_structural_line(next_line):
+        next_line = lines[idx + 1] if idx + 1 < n_lines else ""
+        next_has_text = has_text[idx + 1] if idx + 1 < n_lines else False
+        next_is_struct = is_struct[idx + 1] if idx + 1 < n_lines else False
+
+        if line.endswith("-") and next_has_text and not next_is_struct:
             merged_lines.append(line[:-1])
             continue
 
-        if _is_structural_line(line) or _is_structural_line(next_line) or not next_line.strip():
+        if is_struct[idx] or next_is_struct or not next_has_text:
             merged_lines.append(line)
         else:
             merged_lines.append(f"{line} ")

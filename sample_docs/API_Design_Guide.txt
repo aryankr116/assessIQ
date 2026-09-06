@@ -1,0 +1,71 @@
+API Design & Standards Guide v3.0
+Platform Engineering Team
+
+1. RESTful API Design Principles
+
+All APIs follow REST conventions with consistent resource naming: /api/{version}/{resource}
+
+HTTP methods map to CRUD operations:
+- GET: Read resources (idempotent, cacheable)
+- POST: Create new resources
+- PUT: Full resource replacement
+- PATCH: Partial resource update
+- DELETE: Remove resources
+
+Response codes must be semantically correct:
+- 200: Successful operation
+- 201: Resource created successfully
+- 204: Successful deletion (no content)
+- 400: Invalid request parameters
+- 401: Authentication required
+- 403: Insufficient permissions
+- 404: Resource not found
+- 409: Conflict with existing state
+- 422: Validation error
+- 429: Rate limit exceeded
+- 500: Internal server error
+
+2. Authentication & Authorization
+
+All API requests must include a valid JWT bearer token in the Authorization header. Tokens are issued by the centralized auth service and expire after 1 hour.
+
+Token payload includes: user_id, role, permissions, and token_version. Permission checks are performed at the API gateway and service level (defense in depth).
+
+API keys are used for service-to-service communication. Keys are scoped to specific endpoints and have configurable rate limits.
+
+3. Request & Response Format
+
+All request and response bodies use JSON with UTF-8 encoding. The Content-Type header must be set to application/json.
+
+Standard response envelope:
+{
+  "data": { ... },
+  "meta": { "page": 1, "per_page": 20, "total": 150 },
+  "errors": []
+}
+
+Pagination uses cursor-based pagination for large datasets and offset-based for admin dashboards. Default page size is 20, maximum is 100.
+
+4. Rate Limiting
+
+Rate limits are enforced per API key:
+- Standard tier: 100 requests per minute
+- Premium tier: 1000 requests per minute
+- Internal services: 10000 requests per minute
+
+Rate limit headers are included in every response:
+- X-RateLimit-Limit: Maximum requests per window
+- X-RateLimit-Remaining: Requests remaining
+- X-RateLimit-Reset: Unix timestamp when the window resets
+
+5. Versioning Strategy
+
+API versions are included in the URL path (/api/v1/, /api/v2/). Major versions are incremented for breaking changes. Minor versions are used for additive changes within a major version.
+
+Deprecated endpoints return a Sunset header with the removal date. Clients are notified 90 days before deprecated endpoints are removed.
+
+6. Error Handling
+
+All error responses follow a consistent format with error code, human-readable message, and machine-readable details. Validation errors include field-level details for programmatic handling.
+
+Correlation IDs are required in all requests and propagated through the entire call stack. The ID is returned in the X-Request-ID response header for debugging and support.

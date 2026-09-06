@@ -6,7 +6,8 @@ import { TourProvider } from "./context/TourContext.jsx";
 import Layout from "./components/Layout.jsx";
 import Login from "./pages/Login.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
-import Documents from "./pages/Documents.jsx";
+import DocsLibrary from "./pages/DocsLibrary.jsx";
+import Candidates from "./pages/Candidates.jsx";
 import Generate from "./pages/Generate.jsx";
 import Results from "./pages/Results.jsx";
 import Admin from "./pages/Admin.jsx";
@@ -30,7 +31,9 @@ export default function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/documents" element={<Documents />} />
+            <Route path="/docs" element={<DocsLibrary />} />
+            <Route path="/documents" element={<DocsLibrary />} />
+            <Route path="/candidates" element={<Candidates />} />
             <Route path="/generate" element={<Generate />} />
             <Route path="/results" element={<Results />} />
             <Route

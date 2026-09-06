@@ -26,6 +26,7 @@ class AppStore:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._docs_path = self.data_dir / "documents.json"
         self._sets_path = self.data_dir / "qa_sets.json"
+        self._candidates_path = self.data_dir / "candidates.json"
 
         dim = get_embedder_dim()
         store = VectorStore.load(self.data_dir, dim)
@@ -33,6 +34,7 @@ class AppStore:
 
         self.documents: Dict[str, dict] = self._load(self._docs_path)
         self.qa_sets: Dict[str, dict] = self._load(self._sets_path)
+        self.candidates: Dict[str, dict] = self._load(self._candidates_path)
 
         # Admin-tunable system parameters (persisted).
         self._params_path = self.data_dir / "params.json"
@@ -77,9 +79,14 @@ class AppStore:
         with open(self._sets_path, "w", encoding="utf-8") as f:
             json.dump(list(self.qa_sets.values()), f, ensure_ascii=False, indent=2)
 
+    def _save_candidates(self):
+        with open(self._candidates_path, "w", encoding="utf-8") as f:
+            json.dump(list(self.candidates.values()), f, ensure_ascii=False, indent=2)
+
     def persist(self):
         self._save_docs()
         self._save_sets()
+        self._save_candidates()
         self.pipeline.store.save(self.data_dir)
 
     # -- documents --------------------------------------------------------
@@ -100,10 +107,33 @@ class AppStore:
         self.persist()
         return True
 
+    # -- candidates --------------------------------------------------------
+    def list_candidates(self) -> List[dict]:
+        return sorted(
+            self.candidates.values(), key=lambda c: c["uploadedAt"], reverse=True
+        )
+
+    def upsert_candidate(self, candidate: dict):
+        self.candidates[candidate["id"]] = candidate
+        self._save_candidates()
+
+    def delete_candidate(self, candidate_id: str) -> bool:
+        if candidate_id not in self.candidates:
+            return False
+        del self.candidates[candidate_id]
+        self._save_candidates()
+        return True
+
     # -- qa sets ----------------------------------------------------------
     def list_qa_sets(self) -> List[dict]:
+        # Ensure all QA sets have a questions array (for backward compatibility)
         return sorted(
-            self.qa_sets.values(), key=lambda s: s["createdAt"], reverse=True
+            [
+                {**s, "questions": s.get("questions", [])}
+                for s in self.qa_sets.values()
+            ],
+            key=lambda s: s["createdAt"],
+            reverse=True,
         )
 
     def add_qa_set(self, qa_set: dict):

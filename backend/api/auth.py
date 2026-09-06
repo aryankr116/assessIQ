@@ -1,12 +1,11 @@
 """Authentication and user accounts (Recruiter / Admin).
 
-Lightweight, dependency-free auth suitable for a project prototype:
+Users are stored in PostgreSQL (users table). The seed admin is created
+automatically by DatabaseService._seed_admin_if_needed on first run.
+
   - passwords hashed with PBKDF2-HMAC-SHA256 + per-user salt
   - stateless bearer tokens signed with HMAC (survive restarts)
   - two roles: "recruiter" (default) and "admin"
-  - users persisted to <data_dir>/users.json; a seed admin is created on first run
-
-Maps to the report's class/use-case diagrams (User entity, Recruiter vs Admin).
 """
 
 from __future__ import annotations
@@ -14,17 +13,48 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import json
 import os
 import time
-from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
 
 from ..rag.config import settings
 
 ROLES = {"recruiter", "admin"}
+
+# --- password reset tokens (in-memory, survives restarts are fine for local use)
+_reset_tokens: dict = {}  # token -> {"username": str, "expiry": float}
+
+
+def generate_reset_token(username: str) -> str:
+    """Generate a time-limited reset token for a username."""
+    import secrets
+    token = secrets.token_urlsafe(32)
+    _reset_tokens[token] = {
+        "username": username,
+        "expiry": time.time() + 3600,  # 1 hour
+    }
+    return token
+
+
+def verify_reset_token(token: str) -> Optional[str]:
+    """Verify a reset token and return the username, or None if invalid/expired."""
+    data = _reset_tokens.get(token)
+    if not data:
+        return None
+    if time.time() > data["expiry"]:
+        del _reset_tokens[token]
+        return None
+    return data["username"]
+
+
+def consume_reset_token(token: str) -> Optional[str]:
+    """Verify and delete a reset token. Returns username or None."""
+    username = verify_reset_token(token)
+    if username:
+        del _reset_tokens[token]
+    return username
 
 
 # --- password hashing ----------------------------------------------------
@@ -71,61 +101,96 @@ def verify_token(token: str) -> Optional[dict]:
 
 # --- user store ----------------------------------------------------------
 class UserStore:
+    """PostgreSQL-backed user store.
+
+    The admin seed is created once in DatabaseService.__init__ when the users
+    table is empty, so there is no seed logic here — just CRUD delegated to
+    DatabaseService.
+    """
+
     def __init__(self):
-        self.path: Path = settings.data_dir / "users.json"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.users: Dict[str, dict] = {}
-        self._load()
-        self._seed_admin()
+        from ..db_service import get_db_service
+        self._db = get_db_service()
 
-    def _load(self):
-        if self.path.exists():
-            with open(self.path, "r", encoding="utf-8") as f:
-                self.users = {u["username"]: u for u in json.load(f)}
-
-    def _save(self):
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(list(self.users.values()), f, ensure_ascii=False, indent=2)
-
-    def _seed_admin(self):
-        if not self.users:
-            self.users[settings.seed_admin_user] = {
-                "username": settings.seed_admin_user,
-                "password": hash_password(settings.seed_admin_password),
-                "role": "admin",
-                "created_at": int(time.time()),
-            }
-            self._save()
-
-    def create(self, username: str, password: str, role: str = "recruiter") -> dict:
+    def create(self, username: str, password: str, role: str = "recruiter", email: str = "") -> dict:
         username = username.strip()
         if not username or not password:
             raise HTTPException(400, "Username and password are required")
-        if username in self.users:
+        if self._db.get_user_by_username(username):
             raise HTTPException(409, "Username already exists")
         if role not in ROLES:
             role = "recruiter"
-        user = {
-            "username": username,
-            "password": hash_password(password),
-            "role": role,
-            "created_at": int(time.time()),
+        db_user = self._db.create_user(username, hash_password(password), role, email=email)
+        return {
+            "username": db_user.username,
+            "email": db_user.email or "",
+            "password": db_user.password_hash,
+            "role": db_user.role,
+            "created_at": int(db_user.created_at.timestamp()) if db_user.created_at else 0,
         }
-        self.users[username] = user
-        self._save()
-        return user
 
     def authenticate(self, username: str, password: str) -> dict:
-        user = self.users.get(username)
-        if not user or not verify_password(password, user["password"]):
+        db_user = self._db.get_user_by_username(username)
+        if not db_user or not verify_password(password, db_user.password_hash):
             raise HTTPException(401, "Invalid username or password")
-        return user
+        return {
+            "username": db_user.username,
+            "email": db_user.email or "",
+            "password": db_user.password_hash,
+            "role": db_user.role,
+            "created_at": int(db_user.created_at.timestamp()) if db_user.created_at else 0,
+        }
+
+    def google_authenticate(self, google_user: dict) -> dict:
+        """Find or create a user from Google OAuth data."""
+        email = google_user.get("email", "")
+        name = google_user.get("name", email.split("@")[0])
+        username = name.strip().lower().replace(" ", ".")
+
+        # Check if user already exists by username
+        existing = self._db.get_user_by_username(username)
+        if existing:
+            return {
+                "username": existing.username,
+                "email": existing.email or email,
+                "password": existing.password_hash,
+                "role": existing.role,
+                "created_at": int(existing.created_at.timestamp()) if existing.created_at else 0,
+            }
+
+        # Create new user from Google data
+        db_user = self._db.create_user(username, hash_password(""), "recruiter", email=email)
+        return {
+            "username": db_user.username,
+            "email": db_user.email or email,
+            "password": db_user.password_hash,
+            "role": db_user.role,
+            "created_at": int(db_user.created_at.timestamp()) if db_user.created_at else 0,
+        }
 
     def public(self, user: dict) -> dict:
-        return {"username": user["username"], "role": user["role"]}
+        return {"username": user["username"], "role": user["role"], "email": user.get("email", "")}
+
+    def reset_password(self, username: str, new_password: str):
+        """Reset a user's password."""
+        db_user = self._db.get_user_by_username(username)
+        if not db_user:
+            raise HTTPException(404, "User not found")
+        from ..db_service import get_db_service
+        db = get_db_service()
+        session = db.get_session()
+        try:
+            from ..database import User as UserModel
+            u = session.query(UserModel).filter(UserModel.username == username).first()
+            if u:
+                u.password_hash = hash_password(new_password)
+                session.commit()
+        finally:
+            session.close()
 
     def list_public(self):
-        return [self.public(u) for u in self.users.values()]
+        users = self._db.list_users()
+        return [{"username": u.username, "role": u.role} for u in users]
 
 
 _USERS: Optional[UserStore] = None

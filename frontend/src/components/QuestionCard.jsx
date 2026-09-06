@@ -124,7 +124,7 @@ export default function QuestionCard({ question, index, onRate }) {
               <CheckCircle2 size={12} className="text-emerald-600" />
               {q.answerable ? "Grounded Model Answer" : "Answerability Assessment"}
             </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-800">
+            <div className="whitespace-pre-line rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-xs">
               {q.answer}
             </div>
           </div>

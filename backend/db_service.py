@@ -24,17 +24,30 @@ class DatabaseService:
 
     def __init__(self):
         """Initialize database connection."""
-        if not settings.use_sql_db:
-            self.session_factory = None
-            return
-        
         _, self.session_factory = init_db(settings.db_url())
+        self._seed_admin_if_needed()
 
     def get_session(self) -> Session:
         """Get a new database session."""
-        if self.session_factory is None:
-            raise RuntimeError("SQL database not configured")
         return self.session_factory()
+
+    def _seed_admin_if_needed(self):
+        """Create the seed admin user if the users table is empty."""
+        from .api.auth import hash_password
+        session = self.get_session()
+        try:
+            exists = session.query(User).first()
+            if exists is None:
+                admin = User(
+                    id=str(uuid.uuid4()),
+                    username=settings.seed_admin_user,
+                    password_hash=hash_password(settings.seed_admin_password),
+                    role="admin",
+                )
+                session.add(admin)
+                session.commit()
+        finally:
+            session.close()
 
     # --- Documents -------------------------------------------------------
     def create_document(
@@ -53,7 +66,7 @@ class DatabaseService:
                 filename=filename,
                 mime_type=mime_type,
                 file_size=file_size,
-                metadata=metadata or {}
+                meta=metadata or {}
             )
             session.add(doc)
             session.commit()
@@ -156,7 +169,7 @@ class DatabaseService:
                 doc_id=doc_id,
                 job_role=job_role,
                 questions=questions,
-                metadata=metadata or {}
+                meta=metadata or {}
             )
             session.add(qa_set)
             session.commit()
@@ -199,21 +212,43 @@ class DatabaseService:
         self,
         question_set_id: str,
         question_id: str,
-        rating: int,
+        rating,
         comment: str = ""
-    ) -> QuestionRating:
-        """Add a rating for a question."""
+    ) -> Optional[int]:
+        """Upsert a rating (1/-1/None) for a question within a QA set.
+
+        Passing ``rating=None`` clears the rating (row deleted). Returns the
+        resulting rating value, or None if it was cleared.
+        """
         session = self.get_session()
         try:
-            q_rating = QuestionRating(
-                question_set_id=question_set_id,
-                question_id=question_id,
-                rating=rating,
-                comment=comment
+            row = (
+                session.query(QuestionRating)
+                .filter(
+                    QuestionRating.question_set_id == question_set_id,
+                    QuestionRating.question_id == question_id,
+                )
+                .first()
             )
-            session.add(q_rating)
+            if rating is None:
+                if row:
+                    session.delete(row)
+                    session.commit()
+                return None
+            if row:
+                row.rating = rating if rating in (-1, 1) else 0
+                row.comment = comment
+                row.rated_at = datetime.now(timezone.utc)
+            else:
+                row = QuestionRating(
+                    question_set_id=question_set_id,
+                    question_id=question_id,
+                    rating=rating if rating in (-1, 1) else 0,
+                    comment=comment,
+                )
+                session.add(row)
             session.commit()
-            return q_rating
+            return row.rating
         finally:
             session.close()
 
@@ -227,12 +262,24 @@ class DatabaseService:
         finally:
             session.close()
 
+    def get_ratings_map(self, question_set_id: str) -> Dict[str, int]:
+        """Return ratings for a set keyed by question_id (rating value)."""
+        session = self.get_session()
+        try:
+            rows = session.query(QuestionRating).filter(
+                QuestionRating.question_set_id == question_set_id
+            ).all()
+            return {r.question_id: r.rating for r in rows}
+        finally:
+            session.close()
+
     # --- Users -----------------------------------------------------------
     def create_user(
         self,
         username: str,
         password_hash: str,
-        role: str = "recruiter"
+        role: str = "recruiter",
+        email: str = "",
     ) -> User:
         """Create a new user."""
         user_id = str(uuid.uuid4())
@@ -241,6 +288,7 @@ class DatabaseService:
             user = User(
                 id=user_id,
                 username=username,
+                email=email,
                 password_hash=password_hash,
                 role=role
             )
@@ -255,6 +303,14 @@ class DatabaseService:
         session = self.get_session()
         try:
             return session.query(User).filter(User.username == username).first()
+        finally:
+            session.close()
+
+    def get_user_by_email(self, email: str) -> Optional[User]:
+        """Get a user by email."""
+        session = self.get_session()
+        try:
+            return session.query(User).filter(User.email == email).first()
         finally:
             session.close()
 
@@ -274,6 +330,25 @@ class DatabaseService:
             if user:
                 session.delete(user)
                 session.commit()
+        finally:
+            session.close()
+
+    def update_user_profile(self, username: str, new_username: str = None, email: str = None):
+        """Update a user's username and/or email."""
+        session = self.get_session()
+        try:
+            user = session.query(User).filter(User.username == username).first()
+            if user:
+                if new_username is not None:
+                    # Check if new username is already taken
+                    existing = session.query(User).filter(User.username == new_username, User.id != user.id).first()
+                    if existing:
+                        raise ValueError("Username already taken")
+                    user.username = new_username
+                if email is not None:
+                    user.email = email
+                session.commit()
+                return user
         finally:
             session.close()
 

@@ -50,7 +50,7 @@ class Document(Base):
     file_size = Column(Integer)
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     chunk_count = Column(Integer, default=0)
-    metadata = Column(JSON, default={})
+    meta = Column(JSON, default={})
 
     def __repr__(self):
         return f"<Document {self.id}: {self.filename}>"
@@ -80,20 +80,26 @@ class QuestionSet(Base):
     job_role = Column(String(255), nullable=False)
     questions = Column(JSON)  # List of {id, text, answer, type (Knowledge/Skill), confidence, source_chunk_id}
     generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    metadata = Column(JSON, default={})
+    meta = Column(JSON, default={})
 
     def __repr__(self):
         return f"<QuestionSet {self.id}: {self.job_role}>"
 
 
 class QuestionRating(Base):
-    """User ratings for questions."""
+    """User rating (upvote/downvote) for a single question.
+
+    QA sets themselves live in the JSON store, so the question_set_id is a
+    plain string reference (no FK to question_sets.postgres rows). One row per
+    (question_set_id, question_id) representing the current -1/1 vote; the row
+    is deleted when the rating is cleared.
+    """
     __tablename__ = "question_ratings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    question_set_id = Column(String(36), ForeignKey("question_sets.id", ondelete="CASCADE"))
-    question_id = Column(String(36))
-    rating = Column(Integer)  # 1-5 or similar
+    question_set_id = Column(String(36), index=True, nullable=False)
+    question_id = Column(String(36), index=True, nullable=False)
+    rating = Column(Integer)  # -1 = downvote, 1 = upvote
     comment = Column(Text)
     rated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -107,6 +113,7 @@ class User(Base):
 
     id = Column(String(36), primary_key=True)
     username = Column(String(100), unique=True, nullable=False)
+    email = Column(String(255), nullable=True)
     password_hash = Column(String(255), nullable=False)
     role = Column(String(50), default="recruiter")  # admin, recruiter
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

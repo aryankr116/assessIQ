@@ -35,23 +35,28 @@ class GeneratedQA:
 
 
 SYSTEM_PROMPT = (
-    "You are AssessIQ, a closed-domain interview-question generator. You create "
-    "job-specific interview questions and answers using ONLY the provided context "
-    "passages extracted from a company's internal documents. Never use outside "
-    "knowledge. If the context does not support an answer, mark it not answerable. "
-    "Aim for a mix of Knowledge-Based questions (concepts, definitions) and "
-    "Skill-Based questions (implementation, debugging, design)."
+    "You are AssessIQ, an expert technical interview kit generator. You create "
+    "high-caliber, job-specific interview questions and structured model answers based on technical "
+    "domain topics found in internal documentation.\n"
+    "CRITICAL RULES FOR QUESTION FORMULATION:\n"
+    "1. DO NOT formulate questions as document tests or reading checks (e.g. NEVER write 'According to document X...', 'What does section Y say...').\n"
+    "2. Frame questions around real-world engineering concepts, system architecture, performance trade-offs, and applied scenarios on the TOPICS covered by the context.\n"
+    "3. The question must sound like a real technical interviewer evaluating a candidate's domain mastery and problem-solving skills.\n"
+    "4. Ensure answers are grounded in and verifiable by the provided context passages.\n"
+    "5. Format each answer clearly with a 'Core Technical Solution' followed by 'Key Evaluation Criteria' bullet points for the interviewer."
 )
 
 
 _CATEGORY_INSTRUCTION = {
     "knowledge": (
-        "Generate ONLY Knowledge-Based questions — testing concepts, definitions, "
-        "and theoretical understanding (e.g. 'what is', 'explain', 'describe')."
+        "Generate ONLY Knowledge-Based questions — testing fundamental concepts, system mechanics, "
+        "and architectural trade-offs (e.g. 'explain the core principles of', 'what design trade-offs apply to'). "
+        "Do NOT mention document names or page numbers in the question."
     ),
     "skill": (
-        "Generate ONLY Skill-Based questions — testing applied problem-solving "
-        "(e.g. 'implement', 'debug', 'design', 'how would you build')."
+        "Generate ONLY Skill-Based questions — testing applied engineering, real-world troubleshooting, "
+        "and system design scenarios (e.g. 'how would you debug', 'design a zero-downtime strategy for', 'how would you handle failure in'). "
+        "Do NOT mention document names or page numbers in the question."
     ),
 }
 
@@ -72,10 +77,12 @@ def _build_user_prompt(
         f"Job role: {job_role}\n"
         f"Focus: {focus or 'general competencies for this role'}\n\n"
         f"Context passages:\n{ctx}\n\n"
-        f"Generate {n} interview question-answer pairs grounded strictly in the "
-        f"context above. {cat_line}\n"
+        f"Generate {n} realistic candidate interview question-answer pairs derived from the "
+        f"technical topics in the context above. {cat_line}\n"
+        f"IMPORTANT: The questions must test candidate domain knowledge and practical problem-solving. "
+        f"Do NOT phrase questions like 'According to document X' or 'What does the passage say'.\n"
         f"Respond with ONLY a JSON array, each item shaped as:\n"
-        '{"question": "...", "answer": "...", "answerable": true}\n'
+        '{"question": "...", "answer": "Core Technical Solution:\\n...\\n\\nKey Evaluation Criteria:\\n• Point 1\\n• Point 2", "answerable": true}\n'
         "Set answerable to false (and explain briefly in answer) if the context "
         "is insufficient for that question."
     )
@@ -156,32 +163,37 @@ class OllamaProvider:
 
 # ---------------------------------------------------------------------------
 class OfflineProvider:
-    """No-LLM extractive generator. Forms questions/answers directly from the
-    retrieved passages so the system runs fully offline and always returns
-    grounded output. Simpler phrasing than an LLM, but verifiably from-source."""
+    """Topic-centric generator for offline / template mode. Forms practical
+    interview questions on the domain topics found in source passages,
+    without referencing document names in the question text."""
 
     name = "offline"
 
     _KNOWLEDGE_TEMPLATES = [
-        "Based on {doc}, what does the documentation say about \"{topic}\"?",
-        "According to {doc}, explain the concept of \"{topic}\".",
-        "What is described in {doc} regarding \"{topic}\"?",
+        "What are the core technical principles, architectural considerations, and design trade-offs associated with \"{topic}\"?",
+        "When designing scalable enterprise systems for a {role}, how would you structure and manage \"{topic}\"?",
+        "How does \"{topic}\" function under high throughput, and what key metrics or failure modes should be monitored?",
+        "What security controls, authorization standards, and compliance policies should govern \"{topic}\"?",
     ]
     _SKILL_TEMPLATES = [
-        "Using the guidance in {doc}, how would you apply \"{topic}\" in practice?",
-        "Based on {doc}, implement or outline the procedure for \"{topic}\".",
-        "Given the standards in {doc}, how would you handle \"{topic}\" on the job?",
+        "Suppose you encounter a severe latency spike or failure involving \"{topic}\" in production. What step-by-step diagnosis and remediation would you follow?",
+        "How would you implement and configure \"{topic}\" to meet strict reliability and zero-downtime deployment requirements?",
+        "When refactoring a system component that uses \"{topic}\", how do you handle data consistency, failover, and backward compatibility?",
+        "Describe how you would design automated testing and monitoring pipelines for services relying on \"{topic}\".",
     ]
 
     @staticmethod
     def _topic(text: str) -> str:
-        # Take a short, meaningful phrase from the start of the chunk.
+        # Take a clean, meaningful topic phrase from the chunk text.
         snippet = re.sub(r"\s+", " ", text).strip()
+        snippet = re.sub(r"^[#\*\-\d\.\s]+", "", snippet)
         words = snippet.split(" ")
-        return " ".join(words[:8]).rstrip(".,:;") or "this topic"
+        clean_words = [w.strip(".,:;()[]\"'") for w in words[:7] if w]
+        topic_str = " ".join(clean_words)
+        return topic_str or "this architecture component"
 
     @staticmethod
-    def _first_sentences(text: str, max_chars: int = 360) -> str:
+    def _first_sentences(text: str, max_chars: int = 320) -> str:
         snippet = re.sub(r"\s+", " ", text).strip()
         if len(snippet) <= max_chars:
             return snippet
@@ -194,15 +206,24 @@ class OfflineProvider:
             return [
                 GeneratedQA(
                     question=f"No source material was retrieved for a {job_role}.",
-                    answer="This cannot be answered: no relevant context was found "
-                    "in the selected documents.",
+                    answer="This cannot be answered: no relevant context was found in the selected documents.",
                     answerable=False,
                 )
             ]
         out: List[GeneratedQA] = []
         for i, c in enumerate(contexts):
             topic = self._topic(c.text)
-            answer = self._first_sentences(c.text)
+            core_summary = self._first_sentences(c.text, max_chars=320)
+            
+            # Format high-quality structured answer with interviewer rubric
+            answer = (
+                f"Core Technical Solution:\n{core_summary}\n\n"
+                f"Key Evaluation Criteria for Interviewer:\n"
+                f"• Candidate must demonstrate mastery of '{topic}' within a {job_role} architecture.\n"
+                f"• Candidate should specify operational boundaries, security controls, and SLA metrics.\n"
+                f"• Candidate should articulate failure handling, fallback protocols, and concurrency trade-offs."
+            )
+
             # Honour a requested category (two-round mode); else alternate.
             if category == "knowledge":
                 tmpl = self._KNOWLEDGE_TEMPLATES[i % len(self._KNOWLEDGE_TEMPLATES)]
@@ -212,9 +233,10 @@ class OfflineProvider:
                 tmpl = self._KNOWLEDGE_TEMPLATES[i % len(self._KNOWLEDGE_TEMPLATES)]
             else:
                 tmpl = self._SKILL_TEMPLATES[i % len(self._SKILL_TEMPLATES)]
+            
             out.append(
                 GeneratedQA(
-                    question=tmpl.format(doc=c.doc_name, topic=topic),
+                    question=tmpl.format(role=job_role, topic=topic),
                     answer=answer,
                     answerable=True,
                 )

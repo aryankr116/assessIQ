@@ -13,13 +13,11 @@ import {
   Plus,
   Briefcase,
   ChevronRight,
-  Lightbulb,
-  CheckCircle2,
-  Layers,
-  ArrowRight,
+  Search,
 } from "lucide-react";
 import { useApp } from "../context/AppContext.jsx";
-import { Card, Button, TypeBadge, ConfidenceBar, UnanswerablePill } from "../components/ui.jsx";
+import { Card, Button, TypeBadge, ConfidenceBar, UnanswerablePill, StatusBadge } from "../components/ui.jsx";
+import AddCandidateModal from "../components/AddCandidateModal.jsx";
 import QuestionCard from "../components/QuestionCard.jsx";
 
 const PRESET_ROLES = [
@@ -54,6 +52,7 @@ export default function Generate() {
   const [selectedCandidateId, setSelectedCandidateId] = useState(
     paramCandidateId || (candidates[0]?.id ?? "")
   );
+  const [candidateSearch, setCandidateSearch] = useState("");
 
   useEffect(() => {
     if (paramCandidateId) {
@@ -67,6 +66,14 @@ export default function Generate() {
     () => candidates.find((c) => c.id === selectedCandidateId) || null,
     [candidates, selectedCandidateId]
   );
+
+  const filteredCandidates = useMemo(() => {
+    if (!candidateSearch.trim()) return candidates;
+    const q = candidateSearch.toLowerCase();
+    return candidates.filter(
+      (c) => c.name.toLowerCase().includes(q) || c.targetRole.toLowerCase().includes(q)
+    );
+  }, [candidates, candidateSearch]);
 
   // 2. Multiple Job Roles
   const [selectedRoles, setSelectedRoles] = useState(() => [
@@ -85,13 +92,9 @@ export default function Generate() {
   }, [selectedCandidate]);
 
   function toggleRole(role) {
-    if (selectedRoles.includes(role)) {
-      if (selectedRoles.length > 1) {
-        setSelectedRoles(selectedRoles.filter((r) => r !== role));
-      }
-    } else {
-      setSelectedRoles([...selectedRoles, role]);
-    }
+    setSelectedRoles((prev) =>
+      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
+    );
   }
 
   function addCustomRole(e) {
@@ -104,9 +107,7 @@ export default function Generate() {
   }
 
   function removeRole(role) {
-    if (selectedRoles.length > 1) {
-      setSelectedRoles(selectedRoles.filter((r) => r !== role));
-    }
+    setSelectedRoles((prev) => prev.filter((r) => r !== role));
   }
 
   // 3. Prompt
@@ -114,20 +115,25 @@ export default function Generate() {
 
   // 4. Grounding Enterprise Documents
   const [selectedDocs, setSelectedDocs] = useState(() => indexedDocs.map((d) => d.id));
+  const [docSearch, setDocSearch] = useState("");
+  const [showAddCandidate, setShowAddCandidate] = useState(false);
 
-  // 5. Two-round Mode
-  const [twoRound, setTwoRound] = useState(true);
+  // 5. Question type: both | knowledge | skill
+  const [questionType, setQuestionType] = useState("both");
+
+  // 6. Number of questions
+  const [questionCount, setQuestionCount] = useState(6);
 
   // Generation state
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (selectedDocs.length === 0 && indexedDocs.length > 0) {
-      setSelectedDocs(indexedDocs.map((d) => d.id));
-    }
-  }, [indexedDocs.length, selectedDocs.length]);
+  const filteredDocs = useMemo(() => {
+    if (!docSearch.trim()) return documents;
+    const q = docSearch.toLowerCase();
+    return documents.filter((d) => d.name.toLowerCase().includes(q));
+  }, [documents, docSearch]);
 
   function toggleDoc(id) {
     setSelectedDocs((cur) =>
@@ -136,12 +142,17 @@ export default function Generate() {
   }
 
   function selectAllDocs() {
-    if (selectedDocs.length === indexedDocs.length) {
-      setSelectedDocs([]);
+    const visibleIndexed = filteredDocs.filter((d) => d.status === "indexed").map((d) => d.id);
+    const allSelected = visibleIndexed.every((id) => selectedDocs.includes(id));
+    if (allSelected) {
+      setSelectedDocs((cur) => cur.filter((id) => !visibleIndexed.includes(id)));
     } else {
-      setSelectedDocs(indexedDocs.map((d) => d.id));
+      setSelectedDocs((cur) => [...new Set([...cur, ...visibleIndexed])]);
     }
   }
+
+  const allVisibleIndexed = filteredDocs.filter((d) => d.status === "indexed");
+  const allVisibleSelected = allVisibleIndexed.length > 0 && allVisibleIndexed.every((d) => selectedDocs.includes(d.id));
 
   async function onGenerate() {
     setError("");
@@ -150,11 +161,12 @@ export default function Generate() {
       return;
     }
     if (selectedDocs.length === 0) {
-      setError("Please select at least one indexed enterprise document for grounding.");
+      setError("Please select at least one indexed document for grounding.");
       return;
     }
     setGenerating(true);
     setResult(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       const candidateName = selectedCandidate ? selectedCandidate.name : "Interview Candidate";
       const combinedRoleString = selectedRoles.join(" / ");
@@ -169,11 +181,13 @@ export default function Generate() {
         candidateResumeName: selectedCandidate?.resumeName || null,
         jobRole: combinedRoleString,
         prompt: finalPrompt,
-        topK: 6,
+        topK: questionCount,
         documentIds: selectedDocs,
-        twoRound,
+        twoRound: questionType === "both",
+        questionType,
       });
       setResult(set);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       setError(e.message || "Generation failed.");
     } finally {
@@ -182,9 +196,9 @@ export default function Generate() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-      {/* Left Column: Configuration Stepper (5 cols) */}
-      <div className="space-y-6 lg:col-span-5">
+    <div className={`grid grid-cols-1 gap-6 transition-all duration-500 ease-in-out ${generating || result ? "lg:grid-cols-12" : ""}`}>
+      {/* Left Column: Configuration */}
+      <div className={`transition-all duration-500 ease-in-out ${generating || result ? "space-y-6 lg:col-span-5" : "space-y-6 max-w-2xl mx-auto w-full"}`}>
         <Card className="p-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div className="flex items-center gap-2">
@@ -193,12 +207,9 @@ export default function Generate() {
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Assessment Setup</h3>
-                <p className="text-[11px] text-slate-400">Configure candidate RAG parameters</p>
+                <p className="text-[11px] text-slate-400">Configure your interview generation</p>
               </div>
             </div>
-            <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200">
-              Closed-Domain RAG
-            </span>
           </div>
 
           <div className="mt-5 space-y-5">
@@ -213,30 +224,60 @@ export default function Generate() {
                 </label>
                 <button
                   type="button"
-                  onClick={() => navigate("/documents")}
+                  onClick={() => setShowAddCandidate(true)}
                   className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700"
                 >
-                  <UserPlus size={12} /> Manage candidates
+                  <UserPlus size={12} /> Add Candidate
                 </button>
               </div>
 
               {candidates.length === 0 ? (
                 <div className="mt-2 rounded-lg border border-dashed border-amber-300 bg-amber-50/70 p-3 text-xs text-amber-800">
-                  No candidates registered yet. Please add a candidate in the Documents tab.
+                  No candidates yet. Add a candidate first.
                 </div>
               ) : (
                 <div className="mt-2 space-y-2">
-                  <select
-                    value={selectedCandidateId}
-                    onChange={(e) => setSelectedCandidateId(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                  >
-                    {candidates.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} — {c.targetRole}
-                      </option>
-                    ))}
-                  </select>
+                  {/* Candidate search */}
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+                    <input
+                      type="text"
+                      placeholder="Search candidates..."
+                      value={candidateSearch}
+                      onChange={(e) => setCandidateSearch(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                    />
+                  </div>
+
+                  {/* Candidate list */}
+                  <div className="max-h-36 space-y-1 overflow-y-auto scroll-thin">
+                    {filteredCandidates.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 py-2 text-center">No matches</p>
+                    ) : (
+                      filteredCandidates.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { setSelectedCandidateId(c.id); setCandidateSearch(""); }}
+                          className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-xs transition cursor-pointer ${
+                            selectedCandidateId === c.id
+                              ? "border-brand-400 bg-brand-50 font-semibold"
+                              : "border-slate-200 bg-white hover:bg-slate-50"
+                          }`}
+                        >
+                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                            selectedCandidateId === c.id ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300"
+                          }`}>
+                            {selectedCandidateId === c.id && <Check size={10} />}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate font-semibold text-slate-800">{c.name}</span>
+                            <span className="block truncate text-[11px] text-slate-500">{c.targetRole}</span>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
 
                   {selectedCandidate && (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
@@ -246,7 +287,7 @@ export default function Generate() {
                       </div>
                       {selectedCandidate.resumeName && (
                         <div className="mt-1.5 flex items-center gap-1.5 text-slate-700">
-                          <FileCheck2 size={13} className="text-brand-600 flex-shrink-0" />
+                          <FileCheck2 size={13} className="text-brand-600 shrink-0" />
                           <span className="truncate text-[11px] font-medium">{selectedCandidate.resumeName}</span>
                         </div>
                       )}
@@ -256,7 +297,7 @@ export default function Generate() {
               )}
             </div>
 
-            {/* STEP 2: Job Roles (Multi-Role Selection) */}
+            {/* STEP 2: Job Roles */}
             <div className="border-t border-slate-100 pt-4">
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
@@ -269,11 +310,8 @@ export default function Generate() {
                   {selectedRoles.length} selected
                 </span>
               </div>
-              <p className="mt-0.5 text-[11px] text-slate-400">
-                Select one or multiple roles to synthesize multi-faceted questions.
-              </p>
 
-              {/* Active Selected Roles Badges */}
+              {/* Active Roles */}
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {selectedRoles.map((role) => (
                   <span
@@ -286,7 +324,6 @@ export default function Generate() {
                       type="button"
                       onClick={() => removeRole(role)}
                       className="rounded-full p-0.5 hover:bg-brand-700 text-brand-100 hover:text-white"
-                      title="Remove role"
                     >
                       <X size={11} />
                     </button>
@@ -294,7 +331,7 @@ export default function Generate() {
                 ))}
               </div>
 
-              {/* Preset Roles Toggle Chips */}
+              {/* Preset Roles */}
               <div className="mt-3">
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
                   Quick Presets
@@ -320,11 +357,11 @@ export default function Generate() {
                 </div>
               </div>
 
-              {/* Add Custom Role */}
+              {/* Custom Role */}
               <form onSubmit={addCustomRole} className="mt-3 flex gap-2">
                 <input
                   type="text"
-                  placeholder="Add custom role (e.g. Systems Reliability Eng)..."
+                  placeholder="Add custom role..."
                   value={customRoleInput}
                   onChange={(e) => setCustomRoleInput(e.target.value)}
                   className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
@@ -341,81 +378,86 @@ export default function Generate() {
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
                   3
                 </span>
-                Prompt <span className="text-slate-400 font-normal">(optional focus areas)</span>
+                Prompt <span className="text-slate-400 font-normal">(optional)</span>
               </label>
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={2}
-                placeholder="Specific focus topics (e.g. disaster recovery, blue-green deployment, authentication)..."
+                placeholder="Specific focus topics..."
                 className="mt-1.5 w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
               />
-
-              {/* Quick Prompt Suggestions */}
-              <div className="mt-2 space-y-1">
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Quick focus areas:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {PROMPT_SUGGESTIONS.map((s, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setPrompt(s.text)}
-                      className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-brand-50 hover:text-brand-700 transition"
-                      title={s.text}
-                    >
-                      💡 {s.label}
-                    </button>
-                  ))}
-                </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {PROMPT_SUGGESTIONS.map((s, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setPrompt(s.text)}
+                    className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-brand-50 hover:text-brand-700 transition"
+                  >
+                    {s.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* STEP 4: Grounding Documents */}
+            {/* STEP 4: Documents */}
             <div className="border-t border-slate-100 pt-4">
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
                     4
                   </span>
-                  Grounding Enterprise Documents <span className="text-red-500">*</span>
+                  Documents <span className="text-red-500">*</span>
                 </label>
-                {indexedDocs.length > 0 && (
+                {allVisibleIndexed.length > 0 && (
                   <button
                     type="button"
                     onClick={selectAllDocs}
                     className="text-[11px] font-semibold text-brand-600 hover:text-brand-700"
                   >
-                    {selectedDocs.length === indexedDocs.length ? "Deselect all" : "Select all"}
+                    {allVisibleSelected ? "Deselect all" : "Select all"}
                   </button>
                 )}
               </div>
-              <p className="mt-0.5 text-[11px] text-slate-400">
-                Questions will be extracted strictly from these indexed company files.
-              </p>
 
-              <div className="mt-2.5 max-h-40 space-y-1.5 overflow-y-auto scroll-thin pr-1">
-                {indexedDocs.length === 0 ? (
+              {/* Doc search */}
+              <div className="relative mt-2">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+                <input
+                  type="text"
+                  placeholder="Search documents..."
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                />
+              </div>
+
+              <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto scroll-thin pr-1">
+                {filteredDocs.length === 0 ? (
                   <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                    No indexed documents found. Upload documents in the Documents tab.
+                    No documents found.
                   </p>
                 ) : (
-                  indexedDocs.map((d) => {
+                  filteredDocs.map((d) => {
+                    const isIndexed = d.status === "indexed";
                     const isSel = selectedDocs.includes(d.id);
                     return (
                       <button
                         key={d.id}
                         type="button"
-                        onClick={() => toggleDoc(d.id)}
-                        className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-xs transition cursor-pointer ${
-                          isSel
-                            ? "border-brand-300 bg-brand-50 font-semibold"
-                            : "border-slate-200 bg-white hover:bg-slate-50"
+                        disabled={!isIndexed}
+                        onClick={() => isIndexed && toggleDoc(d.id)}
+                        className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-xs transition ${
+                          !isIndexed
+                            ? "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed"
+                            : isSel
+                            ? "border-brand-300 bg-brand-50 font-semibold cursor-pointer"
+                            : "border-slate-200 bg-white hover:bg-slate-50 cursor-pointer"
                         }`}
                       >
                         <span
-                          className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${
+                          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
                             isSel
                               ? "border-brand-600 bg-brand-600 text-white"
                               : "border-slate-300"
@@ -423,51 +465,96 @@ export default function Generate() {
                         >
                           {isSel && <Check size={11} />}
                         </span>
-                        <FileText size={14} className="flex-shrink-0 text-slate-400" />
+                        <FileText size={14} className="shrink-0 text-slate-400" />
                         <span className="truncate text-slate-800">{d.name}</span>
-                        <span className="ml-auto flex-shrink-0 text-[11px] text-slate-400 font-normal">
-                          {d.chunks} chunks
+                        <span className="ml-auto shrink-0 text-[11px] font-normal">
+                          {isIndexed ? (
+                            <span className="text-slate-400">{d.chunks} chunks</span>
+                          ) : (
+                            <StatusBadge status={d.status} />
+                          )}
                         </span>
                       </button>
                     );
                   })
                 )}
               </div>
+              {selectedDocs.length > 0 && (
+                <p className="mt-1.5 text-[11px] text-slate-400">{selectedDocs.length} document{selectedDocs.length !== 1 ? "s" : ""} selected</p>
+              )}
             </div>
 
-            {/* STEP 5: Two-Round Cognitive Mode */}
+            {/* STEP 5: Question Type */}
             <div className="border-t border-slate-100 pt-4">
-              <button
-                type="button"
-                onClick={() => setTwoRound((v) => !v)}
-                className="flex w-full items-start gap-3 rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50 transition cursor-pointer"
-              >
-                <span
-                  className={`mt-0.5 flex h-5 w-9 flex-shrink-0 items-center rounded-full p-0.5 transition ${
-                    twoRound ? "bg-brand-600" : "bg-slate-300"
-                  }`}
-                >
-                  <span
-                    className={`h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                      twoRound ? "translate-x-4" : ""
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
+                  5
+                </span>
+                Question Type
+              </label>
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                Choose the style of questions to generate.
+              </p>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {[
+                  { value: "knowledge", label: "Knowledge", desc: "Concepts & policies" },
+                  { value: "skill", label: "Skill", desc: "Applied scenarios" },
+                  { value: "both", label: "Both", desc: "Knowledge + Skill" },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setQuestionType(opt.value)}
+                    className={`rounded-lg border p-2.5 text-center transition-all cursor-pointer ${
+                      questionType === opt.value
+                        ? "border-brand-500 bg-brand-50 text-brand-700"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-brand-200 hover:bg-slate-50"
                     }`}
+                  >
+                    <span className="block text-xs font-bold">{opt.label}</span>
+                    <span className="block text-[10px] text-slate-400 mt-0.5">{opt.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* STEP 6: Number of Questions */}
+            <div className="border-t border-slate-100 pt-4">
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
+                  6
+                </span>
+                Number of Questions
+              </label>
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                How many questions to generate per round.
+              </p>
+              <div className="mt-3 flex items-center gap-4">
+                <span className="text-[11px] font-medium text-slate-400 w-6 text-center">2</span>
+                <div className="relative flex-1">
+                  <input
+                    type="range"
+                    min={2}
+                    max={20}
+                    step={1}
+                    value={questionCount}
+                    onChange={(e) => setQuestionCount(Number(e.target.value))}
+                    className="w-full h-2 rounded-full appearance-none cursor-pointer bg-slate-200 accent-brand-600"
                   />
+                </div>
+                <span className="text-[11px] font-medium text-slate-400 w-6 text-center">20</span>
+              </div>
+              <div className="mt-1.5 text-center">
+                <span className="inline-flex items-center justify-center rounded-full bg-brand-100 px-3 py-1 text-xs font-bold text-brand-700">
+                  {questionCount} questions
                 </span>
-                <span>
-                  <span className="block text-xs font-bold text-slate-800">
-                    5. Two-Round Cognitive Mode
-                  </span>
-                  <span className="mt-0.5 block text-[11px] text-slate-500 leading-snug">
-                    Generates <strong>Knowledge-Based</strong> (concepts & policies) and <strong>Skill-Based</strong> (applied scenarios & troubleshooting) in distinct rounds.
-                  </span>
-                </span>
-              </button>
+              </div>
             </div>
           </div>
 
           {error && (
             <div className="mt-4 flex items-center gap-2 rounded-lg bg-red-50 p-3 text-xs font-semibold text-red-700">
-              <AlertCircle size={14} className="flex-shrink-0" /> {error}
+              <AlertCircle size={14} className="shrink-0" /> {error}
             </div>
           )}
 
@@ -479,48 +566,49 @@ export default function Generate() {
           >
             {generating ? (
               <>
-                <Loader2 size={16} className="animate-spin" /> Generating Assessment…
+                <Loader2 size={16} className="animate-spin" /> Generating...
               </>
             ) : (
               <>
-                <Sparkles size={16} /> Generate Candidate Q&A
+                <Sparkles size={16} /> Generate Q&A
               </>
             )}
           </Button>
         </Card>
       </div>
 
-      {/* Right Column: Results & Interactive Output Preview (7 cols) */}
-      <div className="lg:col-span-7">
-        {generating && (
-          <GeneratingState
-            candidateName={selectedCandidate?.name || "Candidate"}
-            roles={selectedRoles}
-          />
-        )}
+      {/* Right Column: Results */}
+      {(generating || result) && (
+        <div className="lg:col-span-7 animate-fade-in-up">
+          {generating && (
+            <GeneratingState
+              candidateName={selectedCandidate?.name || "Candidate"}
+              roles={selectedRoles}
+            />
+          )}
 
-        {!generating && !result && (
-          <Card className="flex h-full min-h-[26rem] flex-col items-center justify-center p-10 text-center">
-            <div className="rounded-2xl bg-brand-50 p-4 text-brand-600">
-              <Sparkles size={32} />
+          {!generating && result && (
+            <div className="space-y-4 animate-fade-in-up">
+              <button
+                onClick={() => setResult(null)}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700 mb-2"
+              >
+                ← Back to setup
+              </button>
+              <ResultView
+                result={result}
+                onViewAll={() => navigate(`/results?setId=${result.id}`)}
+              />
             </div>
-            <h3 className="mt-4 text-base font-bold text-slate-800">
-              Grounded Candidate Assessment
-            </h3>
-            <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
-              Configure candidate details, job roles, and enterprise documents on the left.
-              The closed-domain RAG engine will extract verified citations and synthesize interview questions.
-            </p>
-          </Card>
-        )}
+          )}
+        </div>
+      )}
 
-        {!generating && result && (
-          <ResultView
-            result={result}
-            onViewAll={() => navigate(`/results?setId=${result.id}`)}
-          />
-        )}
-      </div>
+      <AddCandidateModal
+        open={showAddCandidate}
+        onClose={() => setShowAddCandidate(false)}
+        onCreated={() => setShowAddCandidate(false)}
+      />
     </div>
   );
 }
@@ -528,23 +616,20 @@ export default function Generate() {
 function GeneratingState({ candidateName, roles = [] }) {
   const roleDisplay = roles.slice(0, 2).join(" & ");
   const steps = [
-    `Analyzing profile & job roles for ${candidateName} (${roleDisplay})`,
-    "Performing vector search across enterprise documentation",
-    "Synthesizing strictly grounded interview answers with chunk citations",
-    "Classifying questions into Knowledge-Based and Skill-Based types",
+    `Analyzing profile for ${candidateName} (${roleDisplay})`,
+    "Searching across enterprise documentation",
+    "Synthesizing grounded interview questions",
+    "Classifying into Knowledge and Skill types",
   ];
   return (
     <Card className="p-8">
       <div className="flex items-center gap-2.5 text-sm font-bold text-slate-800">
         <Loader2 size={18} className="animate-spin text-brand-600" />
-        Running Closed-Domain RAG Pipeline…
+        Generating Interview Q&A...
       </div>
       <div className="mt-6 space-y-3.5">
         {steps.map((s, i) => (
-          <div
-            key={s}
-            className="flex items-center gap-3 text-xs text-slate-600 font-medium"
-          >
+          <div key={s} className="flex items-center gap-3 text-xs text-slate-600 font-medium">
             <span className="h-2 w-2 animate-pulse rounded-full bg-brand-500" />
             {s}
           </div>
@@ -552,11 +637,7 @@ function GeneratingState({ candidateName, roles = [] }) {
       </div>
       <div className="mt-7 space-y-2.5">
         {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className="h-16 animate-pulse rounded-lg bg-slate-100"
-            style={{ animationDelay: `${i * 120}ms` }}
-          />
+          <div key={i} className="h-16 animate-pulse rounded-lg bg-slate-100" style={{ animationDelay: `${i * 120}ms` }} />
         ))}
       </div>
     </Card>
@@ -575,11 +656,9 @@ function ResultView({ result, onViewAll }) {
           <div>
             <div className="flex items-center gap-2">
               <span className="rounded-md bg-brand-50 px-2 py-0.5 text-xs font-bold text-brand-700 border border-brand-200">
-                Generated Assessment
+                Generated
               </span>
-              <span className="text-xs text-slate-400">
-                {result.questions.length} questions
-              </span>
+              <span className="text-xs text-slate-400">{result.questions.length} questions</span>
             </div>
             <h3 className="mt-2 text-lg font-bold text-slate-900">
               {result.candidateName || result.jobRole}
@@ -589,7 +668,7 @@ function ResultView({ result, onViewAll }) {
             </p>
           </div>
           <Button variant="secondary" size="sm" onClick={onViewAll}>
-            Open in Results <ChevronRight size={14} />
+            View All <ChevronRight size={14} />
           </Button>
         </div>
 

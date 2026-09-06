@@ -34,3 +34,4 @@ dist/
 backend/structured_out/
 extracted/
 .tools/
+**/.assessiq_data/

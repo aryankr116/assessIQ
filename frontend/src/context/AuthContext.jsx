@@ -36,8 +36,15 @@ export function AuthProvider({ children }) {
     return user;
   }, []);
 
-  const register = useCallback(async (username, password) => {
-    const { token, user } = await api.register(username, password);
+  const register = useCallback(async (username, password, email) => {
+    const { token, user } = await api.register(username, password, email);
+    tokenStore.set(token);
+    setUser(user);
+    return user;
+  }, []);
+
+  const googleLogin = useCallback(async (credential) => {
+    const { token, user } = await api.googleLogin(credential);
     tokenStore.set(token);
     setUser(user);
     return user;
@@ -49,7 +56,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, setUser, loading, login, register, googleLogin, logout }}>
       {children}
     </AuthContext.Provider>
   );

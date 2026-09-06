@@ -98,9 +98,9 @@ export default function Results() {
     );
   }
 
-  const knCount = active ? active.questions.filter((q) => q.type === "knowledge").length : 0;
-  const skCount = active ? active.questions.filter((q) => q.type === "skill").length : 0;
-  const oosCount = active ? active.questions.filter((q) => !q.answerable).length : 0;
+  const knCount = active ? (active.questions || []).filter((q) => q.type === "knowledge").length : 0;
+  const skCount = active ? (active.questions || []).filter((q) => q.type === "skill").length : 0;
+  const oosCount = active ? (active.questions || []).filter((q) => !q.answerable).length : 0;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 animate-fade-in-up">
@@ -125,9 +125,9 @@ export default function Results() {
         <div className="space-y-2 max-h-[calc(100vh-14rem)] overflow-y-auto scroll-thin pr-1">
           {sorted.map((set) => {
             const isActive = set.id === active?.id;
-            const displayName = set.candidateName || set.jobRole;
-            const displayRole = set.candidateRole || set.jobRole;
-            const qCount = set.questions?.length || 0;
+            const candidateName = set.candidateName || "Unnamed";
+            const candidateRole = set.candidateRole || set.jobRole || "No Role";
+            const qCount = (set.questions || []).length;
 
             return (
               <button
@@ -147,16 +147,16 @@ export default function Results() {
                         : "bg-slate-100 text-slate-700"
                     }`}
                   >
-                    {displayName.slice(0, 2).toUpperCase()}
+                    {candidateName.slice(0, 2).toUpperCase()}
                   </div>
 
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-bold text-slate-900">
-                      {displayName}
+                      {candidateName}
                     </div>
 
-                    <div className="truncate text-xs font-medium text-brand-700 mt-0.5">
-                      {displayRole}
+                    <div className="truncate text-xs font-medium text-slate-500 mt-0.5">
+                      {candidateRole}
                     </div>
 
                     <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 font-medium">
@@ -266,10 +266,10 @@ export default function Results() {
                 {FILTERS.map((f) => {
                   const count =
                     f.key === "all"
-                      ? active.questions.length
+                      ? (active.questions || []).length
                       : f.key === "unanswerable"
-                      ? active.questions.filter((q) => !q.answerable).length
-                      : active.questions.filter((q) => q.type === f.key).length;
+                      ? (active.questions || []).filter((q) => !q.answerable).length
+                      : (active.questions || []).filter((q) => q.type === f.key).length;
                   const isSel = filter === f.key;
                   return (
                     <button

@@ -1,0 +1,51 @@
+Information Security Policy v3.1
+Classification: Internal Use Only
+
+1. Access Control & Authentication
+
+All access to production systems requires multi-factor authentication (MFA). Single-factor authentication is permitted only for development and staging environments with VPN enforcement.
+
+Role-based access control (RBAC) is enforced across all services. Users are assigned the minimum privileges necessary for their job function (principle of least privilege). Access reviews are conducted quarterly by the Security team.
+
+Service accounts must not have interactive login capabilities. API keys and service credentials are rotated every 90 days automatically through the secrets management platform.
+
+2. Data Classification & Protection
+
+Data is classified into four tiers:
+- Public: Marketing content, public API documentation
+- Internal: Engineering docs, internal dashboards, non-sensitive metrics
+- Confidential: Customer PII, financial data, authentication credentials
+- Restricted: Encryption keys, master database credentials, payment processing data
+
+Confidential and Restricted data must be encrypted at rest (AES-256) and in transit (TLS 1.3). Data masking must be applied in non-production environments.
+
+3. Secrets Management
+
+All secrets, API keys, and certificates are stored in the company vault (HashiCorp Vault). Developers must never commit secrets to source code repositories. Pre-commit hooks scan for accidental secret exposure.
+
+Secret rotation schedules:
+- Database credentials: 90 days
+- API keys: 90 days
+- TLS certificates: 365 days (auto-renewed)
+- Encryption keys: 180 days
+
+4. Incident Response
+
+Security incidents are classified as:
+- P1: Active data breach or unauthorized access to production systems
+- P2: Suspected vulnerability exploitation or policy violation
+- P3: Potential security weakness identified during review
+
+The Incident Response Team must be assembled within 15 minutes for P1 incidents. All security events are logged to the SIEM platform and retained for 12 months.
+
+5. Network Security
+
+Production environments are isolated in dedicated VPCs with strict network segmentation. Inter-service communication uses mutual TLS (mTLS) authentication.
+
+External-facing services must be behind a Web Application Firewall (WAF). DDoS protection is enabled for all public endpoints. Rate limiting is enforced at the API gateway level.
+
+6. Vulnerability Management
+
+Dependencies are scanned daily using automated tools. Critical vulnerabilities must be patched within 24 hours. High-severity vulnerabilities must be patched within 7 days.
+
+Penetration testing is conducted quarterly by an external firm. All findings are tracked in the security backlog and remediated based on severity.

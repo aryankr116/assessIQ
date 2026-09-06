@@ -50,6 +50,9 @@ class Question(CamelModel):
 class QASet(CamelModel):
     id: str
     job_role: str
+    candidate_id: Optional[str] = None
+    candidate_name: Optional[str] = None
+    candidate_role: Optional[str] = None
     prompt: str
     top_k: int
     created_at: str
@@ -59,10 +62,14 @@ class QASet(CamelModel):
 
 class GenerateRequest(CamelModel):
     job_role: str
+    candidate_id: Optional[str] = None
+    candidate_name: Optional[str] = None
+    candidate_role: Optional[str] = None
     prompt: str = ""
     top_k: int = 6
     document_ids: List[str] = []
     two_round: bool = False  # generate Knowledge then Skill in separate rounds
+    question_type: Optional[str] = None  # "both", "knowledge", "skill"
 
 
 class RatingRequest(CamelModel):
@@ -78,11 +85,62 @@ class LoginRequest(CamelModel):
 class RegisterRequest(CamelModel):
     username: str
     password: str
+    email: Optional[str] = None
+
+
+class GoogleLoginRequest(CamelModel):
+    credential: str
+
+
+class ForgotPasswordRequest(CamelModel):
+    email: str
+
+
+class ResetPasswordRequest(CamelModel):
+    token: str
+    new_password: str
+
+
+class ChangePasswordRequest(CamelModel):
+    current_password: str
+    new_password: str
+
+
+class UpdateProfileRequest(CamelModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
 
 
 class User(CamelModel):
     username: str
     role: str
+    email: Optional[str] = None
+
+
+class Candidate(CamelModel):
+    id: str
+    name: str
+    email: str
+    target_role: str
+    resume_name: str
+    resume_ext: str
+    resume_size_bytes: int
+    uploaded_at: str
+    skills: List[str] = []
+    experience_years: int = 0
+    summary: str = ""
+
+
+class CandidateCreateRequest(CamelModel):
+    name: str
+    email: Optional[str] = None
+    target_role: str
+    resume_name: Optional[str] = None
+    resume_ext: Optional[str] = None
+    resume_size_bytes: Optional[int] = None
+    skills: List[str] = []
+    experience_years: Optional[int] = None
+    summary: Optional[str] = None
 
 
 class AuthResponse(CamelModel):

@@ -62,3 +62,31 @@ export function exportCSV(set) {
   download(filename, [header.join(","), ...rows].join("\n"), "text/csv");
 }
 
+export function exportPDF(set) {
+  let content = `ASSESSIQ - CANDIDATE INTERVIEW KIT\n`;
+  content += `====================================\n`;
+  content += `Candidate: ${set.candidateName || "Interview Candidate"}\n`;
+  content += `Target Role: ${set.candidateRole || set.jobRole}\n`;
+  content += `Date Generated: ${new Date(set.createdAt).toLocaleString()}\n`;
+  content += `Prompt: ${set.prompt || "Default"}\n\n`;
+
+  set.questions.forEach((q, i) => {
+    content += `QUESTION ${i + 1} [${q.type.toUpperCase()}] (Confidence: ${Math.round((q.confidence || 0) * 100)}%):\n`;
+    content += `${q.question}\n\n`;
+    content += `ANSWER:\n${q.answer}\n\n`;
+    if (q.sources?.length) {
+      content += `CITATIONS:\n`;
+      q.sources.forEach((s) => {
+        content += `- ${s.docName} (Chunk #${s.chunkId}): "${s.snippet}"\n`;
+      });
+    }
+    content += `------------------------------------\n\n`;
+  });
+
+  const filename = set.candidateName
+    ? `${slug(set.candidateName)}-interview-kit.txt`
+    : `${slug(set.jobRole)}-interview-kit.txt`;
+  download(filename, content, "text/plain");
+}
+
+
