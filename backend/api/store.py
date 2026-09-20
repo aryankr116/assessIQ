@@ -26,7 +26,7 @@ class AppStore:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._docs_path = self.data_dir / "documents.json"
         self._sets_path = self.data_dir / "qa_sets.json"
-        self._candidates_path = self.data_dir / "candidates.json"
+        self._profiles_path = self.data_dir / "job_profiles.json"
 
         dim = get_embedder_dim()
         store = VectorStore.load(self.data_dir, dim)
@@ -34,7 +34,7 @@ class AppStore:
 
         self.documents: Dict[str, dict] = self._load(self._docs_path)
         self.qa_sets: Dict[str, dict] = self._load(self._sets_path)
-        self.candidates: Dict[str, dict] = self._load(self._candidates_path)
+        self.job_profiles: Dict[str, dict] = self._load(self._profiles_path)
 
         # Admin-tunable system parameters (persisted).
         self._params_path = self.data_dir / "params.json"
@@ -79,21 +79,22 @@ class AppStore:
         with open(self._sets_path, "w", encoding="utf-8") as f:
             json.dump(list(self.qa_sets.values()), f, ensure_ascii=False, indent=2)
 
-    def _save_candidates(self):
-        with open(self._candidates_path, "w", encoding="utf-8") as f:
-            json.dump(list(self.candidates.values()), f, ensure_ascii=False, indent=2)
+    def _save_profiles(self):
+        with open(self._profiles_path, "w", encoding="utf-8") as f:
+            json.dump(list(self.job_profiles.values()), f, ensure_ascii=False, indent=2)
 
     def persist(self):
         self._save_docs()
         self._save_sets()
-        self._save_candidates()
+        self._save_profiles()
         self.pipeline.store.save(self.data_dir)
 
     # -- documents --------------------------------------------------------
-    def list_documents(self) -> List[dict]:
-        return sorted(
-            self.documents.values(), key=lambda d: d["uploadedAt"], reverse=True
-        )
+    def list_documents(self, job_profile_id: Optional[str] = None) -> List[dict]:
+        docs = self.documents.values()
+        if job_profile_id is not None:
+            docs = [d for d in docs if d.get("jobProfileId") == job_profile_id]
+        return sorted(docs, key=lambda d: d["uploadedAt"], reverse=True)
 
     def upsert_document(self, doc: dict):
         self.documents[doc["id"]] = doc
@@ -107,21 +108,21 @@ class AppStore:
         self.persist()
         return True
 
-    # -- candidates --------------------------------------------------------
-    def list_candidates(self) -> List[dict]:
+    # -- job profiles ------------------------------------------------------
+    def list_job_profiles(self) -> List[dict]:
         return sorted(
-            self.candidates.values(), key=lambda c: c["uploadedAt"], reverse=True
+            self.job_profiles.values(), key=lambda p: p["createdAt"], reverse=True
         )
 
-    def upsert_candidate(self, candidate: dict):
-        self.candidates[candidate["id"]] = candidate
-        self._save_candidates()
+    def upsert_job_profile(self, profile: dict):
+        self.job_profiles[profile["id"]] = profile
+        self._save_profiles()
 
-    def delete_candidate(self, candidate_id: str) -> bool:
-        if candidate_id not in self.candidates:
+    def delete_job_profile(self, profile_id: str) -> bool:
+        if profile_id not in self.job_profiles:
             return False
-        del self.candidates[candidate_id]
-        self._save_candidates()
+        del self.job_profiles[profile_id]
+        self._save_profiles()
         return True
 
     # -- qa sets ----------------------------------------------------------

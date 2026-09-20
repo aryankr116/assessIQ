@@ -7,28 +7,17 @@ import {
   SlidersHorizontal,
   Loader2,
   AlertCircle,
-  UserPlus,
-  FileCheck2,
   X,
-  Plus,
-  Briefcase,
   ChevronRight,
   Search,
+  Briefcase,
+  Plus,
+  Upload,
 } from "lucide-react";
 import { useApp } from "../context/AppContext.jsx";
-import { Card, Button, TypeBadge, ConfidenceBar, UnanswerablePill, StatusBadge } from "../components/ui.jsx";
-import AddCandidateModal from "../components/AddCandidateModal.jsx";
+import { Card, Button, TypeBadge, UnanswerablePill, StatusBadge } from "../components/ui.jsx";
 import QuestionCard from "../components/QuestionCard.jsx";
-
-const PRESET_ROLES = [
-  "Senior Backend Engineer",
-  "Data Engineer",
-  "DevOps Specialist",
-  "Security Analyst",
-  "Frontend Engineer",
-  "Cloud Architect",
-  "Machine Learning Engineer",
-];
+import { formatBytes } from "../lib/format.js";
 
 const PROMPT_SUGGESTIONS = [
   { label: "Deployment & CI/CD", text: "Focus on automated CI/CD rollbacks, zero-downtime deployment, and canary testing." },
@@ -37,103 +26,143 @@ const PROMPT_SUGGESTIONS = [
   { label: "System Scalability", text: "Focus on horizontal scaling, caching topologies, and microservice SLA metrics." },
 ];
 
+const ACCEPTED_DOCS = ".pdf,.docx,.txt,.pptx,.md,.png,.jpg,.jpeg,.tiff,.tif,.bmp";
+
 export default function Generate() {
-  const { documents, candidates, generateQA } = useApp();
+  const { jobProfiles, generateQA, generateState, setGenerateState, createJobProfileQuick, uploadDocument } = useApp();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const paramCandidateId = searchParams.get("candidateId");
+  const paramJobRole = searchParams.get("jobRole");
+  const paramProfileId = searchParams.get("profileId");
+
+  // Initialize from persisted state or URL params (only once)
+  const initialized = useMemo(() => {
+    if (paramProfileId && paramJobRole) {
+      return { profileId: paramProfileId, role: paramJobRole };
+    }
+    return null;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 1. Job Role / Profile Selection
+  const [selectedProfileId, setSelectedProfileId] = useState(
+    generateState?.selectedProfileId || initialized?.profileId || ""
+  );
+  const [selectedRole, setSelectedRole] = useState(
+    generateState?.selectedRole || initialized?.role || ""
+  );
+  const [roleSearch, setRoleSearch] = useState("");
+
+  // Inline create
+  const [showCreateRole, setShowCreateRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [creatingRole, setCreatingRole] = useState(false);
+  const [newRoleFiles, setNewRoleFiles] = useState([]);
+  const [newRoleDragging, setNewRoleDragging] = useState(false);
+
+  // Documents for selected profile
+  const [profileDocs, setProfileDocs] = useState([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+
+  // Load documents when profile changes
+  useEffect(() => {
+    if (!selectedProfileId) {
+      setProfileDocs([]);
+      return;
+    }
+    let active = true;
+    (async () => {
+      setLoadingDocs(true);
+      try {
+        const api = (await import("../api/client.js")).default;
+        const docs = await api.listDocuments(selectedProfileId);
+        if (active) setProfileDocs(docs);
+      } finally {
+        if (active) setLoadingDocs(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [selectedProfileId]);
+
+  // Poll for doc status changes
+  useEffect(() => {
+    if (!selectedProfileId) return;
+    const stillProcessing = profileDocs.some(
+      (d) => d.status !== "indexed" && d.status !== "failed"
+    );
+    if (!stillProcessing) return;
+    const t = setInterval(async () => {
+      const api = (await import("../api/client.js")).default;
+      const docs = await api.listDocuments(selectedProfileId);
+      setProfileDocs(docs);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [selectedProfileId, profileDocs]);
 
   const indexedDocs = useMemo(
-    () => documents.filter((d) => d.status === "indexed"),
-    [documents]
+    () => profileDocs.filter((d) => d.status === "indexed"),
+    [profileDocs]
   );
 
-  // 1. Candidate Selection
-  const [selectedCandidateId, setSelectedCandidateId] = useState(
-    paramCandidateId || (candidates[0]?.id ?? "")
-  );
-  const [candidateSearch, setCandidateSearch] = useState("");
+  const filteredProfiles = useMemo(() => {
+    if (!roleSearch.trim()) return jobProfiles;
+    const q = roleSearch.toLowerCase();
+    return jobProfiles.filter((p) => p.name.toLowerCase().includes(q));
+  }, [jobProfiles, roleSearch]);
 
+  // 2. Prompt (per-profile, persisted)
+  const profilePrompts = generateState?.profilePrompts || {};
+  const [prompt, setPrompt] = useState(profilePrompts[selectedProfileId] || generateState?.prompt || "");
+
+  // 3. Selected docs (defaults to all indexed)
+  const [selectedDocs, setSelectedDocs] = useState(generateState?.selectedDocs || []);
+
+  // Pre-select all indexed docs whenever they change (only if not restoring from persistence)
   useEffect(() => {
-    if (paramCandidateId) {
-      setSelectedCandidateId(paramCandidateId);
-    } else if (!selectedCandidateId && candidates.length > 0) {
-      setSelectedCandidateId(candidates[0].id);
+    if (generateState?.selectedProfileId === selectedProfileId && generateState?.selectedDocs?.length > 0) {
+      // Restoring from persistence — keep saved selection
+      return;
     }
-  }, [paramCandidateId, candidates, selectedCandidateId]);
+    setSelectedDocs(indexedDocs.map((d) => d.id));
+  }, [indexedDocs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectedCandidate = useMemo(
-    () => candidates.find((c) => c.id === selectedCandidateId) || null,
-    [candidates, selectedCandidateId]
-  );
+  // 4. Question type (persisted)
+  const [questionType, setQuestionType] = useState(generateState?.questionType || "both");
 
-  const filteredCandidates = useMemo(() => {
-    if (!candidateSearch.trim()) return candidates;
-    const q = candidateSearch.toLowerCase();
-    return candidates.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.targetRole.toLowerCase().includes(q)
-    );
-  }, [candidates, candidateSearch]);
+  // 5. Number of questions (persisted)
+  const [questionCount, setQuestionCount] = useState(generateState?.questionCount || 6);
 
-  // 2. Multiple Job Roles
-  const [selectedRoles, setSelectedRoles] = useState(() => [
-    selectedCandidate?.targetRole || "Senior Backend Engineer",
-  ]);
-  const [customRoleInput, setCustomRoleInput] = useState("");
-
-  useEffect(() => {
-    if (selectedCandidate?.targetRole) {
-      setSelectedRoles((prev) =>
-        prev.includes(selectedCandidate.targetRole)
-          ? prev
-          : [selectedCandidate.targetRole, ...prev]
-      );
-    }
-  }, [selectedCandidate]);
-
-  function toggleRole(role) {
-    setSelectedRoles((prev) =>
-      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
-    );
-  }
-
-  function addCustomRole(e) {
-    e.preventDefault();
-    const trimmed = customRoleInput.trim();
-    if (trimmed && !selectedRoles.includes(trimmed)) {
-      setSelectedRoles([...selectedRoles, trimmed]);
-      setCustomRoleInput("");
-    }
-  }
-
-  function removeRole(role) {
-    setSelectedRoles((prev) => prev.filter((r) => r !== role));
-  }
-
-  // 3. Prompt
-  const [prompt, setPrompt] = useState("");
-
-  // 4. Grounding Enterprise Documents
-  const [selectedDocs, setSelectedDocs] = useState(() => indexedDocs.map((d) => d.id));
-  const [docSearch, setDocSearch] = useState("");
-  const [showAddCandidate, setShowAddCandidate] = useState(false);
-
-  // 5. Question type: both | knowledge | skill
-  const [questionType, setQuestionType] = useState("both");
-
-  // 6. Number of questions
-  const [questionCount, setQuestionCount] = useState(6);
-
-  // Generation state
+  // Generation state (not persisted — always fresh)
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
 
-  const filteredDocs = useMemo(() => {
-    if (!docSearch.trim()) return documents;
-    const q = docSearch.toLowerCase();
-    return documents.filter((d) => d.name.toLowerCase().includes(q));
-  }, [documents, docSearch]);
+  // Persist form state on every change
+  useEffect(() => {
+    setGenerateState((prev) => ({
+      ...(prev || {}),
+      selectedProfileId,
+      selectedRole,
+      profilePrompts: {
+        ...(prev?.profilePrompts || {}),
+        [selectedProfileId]: prompt,
+      },
+      selectedDocs,
+      questionType,
+      questionCount,
+    }));
+  }, [selectedProfileId, selectedRole, prompt, selectedDocs, questionType, questionCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When profile changes, load the saved prompt for that profile
+  const prevProfileRef = useMemo(() => ({ current: selectedProfileId }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const savedPrompt = generateState?.profilePrompts?.[selectedProfileId];
+    if (savedPrompt !== undefined && savedPrompt !== prompt) {
+      setPrompt(savedPrompt);
+    } else if (!savedPrompt && selectedProfileId) {
+      // New profile with no saved prompt — start empty
+      setPrompt("");
+    }
+  }, [selectedProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleDoc(id) {
     setSelectedDocs((cur) =>
@@ -142,22 +171,39 @@ export default function Generate() {
   }
 
   function selectAllDocs() {
-    const visibleIndexed = filteredDocs.filter((d) => d.status === "indexed").map((d) => d.id);
-    const allSelected = visibleIndexed.every((id) => selectedDocs.includes(id));
+    const allSelected = indexedDocs.every((d) => selectedDocs.includes(d.id));
     if (allSelected) {
-      setSelectedDocs((cur) => cur.filter((id) => !visibleIndexed.includes(id)));
+      setSelectedDocs([]);
     } else {
-      setSelectedDocs((cur) => [...new Set([...cur, ...visibleIndexed])]);
+      setSelectedDocs(indexedDocs.map((d) => d.id));
     }
   }
 
-  const allVisibleIndexed = filteredDocs.filter((d) => d.status === "indexed");
-  const allVisibleSelected = allVisibleIndexed.length > 0 && allVisibleIndexed.every((d) => selectedDocs.includes(d.id));
+  // Inline profile creation
+  async function handleCreateRole(e) {
+    e.preventDefault();
+    if (!newRoleName.trim()) return;
+    setCreatingRole(true);
+    try {
+      const profile = await createJobProfileQuick({ name: newRoleName.trim() });
+      // Upload any files
+      for (const file of newRoleFiles) {
+        await uploadDocument(profile.id, file);
+      }
+      setSelectedProfileId(profile.id);
+      setSelectedRole(profile.name);
+      setNewRoleName("");
+      setNewRoleFiles([]);
+      setShowCreateRole(false);
+    } finally {
+      setCreatingRole(false);
+    }
+  }
 
   async function onGenerate() {
     setError("");
-    if (selectedRoles.length === 0) {
-      setError("Please select or add at least one target job role.");
+    if (!selectedRole.trim()) {
+      setError("Please select or enter a target job role.");
       return;
     }
     if (selectedDocs.length === 0) {
@@ -168,23 +214,18 @@ export default function Generate() {
     setResult(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
     try {
-      const candidateName = selectedCandidate ? selectedCandidate.name : "Interview Candidate";
-      const combinedRoleString = selectedRoles.join(" / ");
       const finalPrompt =
         prompt.trim() ||
-        `Generate interview questions for ${candidateName} targeting ${combinedRoleString} grounded in enterprise documentation.`;
+        `Generate interview questions for ${selectedRole} grounded in enterprise documentation.`;
 
       const set = await generateQA({
-        candidateId: selectedCandidate?.id || null,
-        candidateName,
-        candidateRole: combinedRoleString,
-        candidateResumeName: selectedCandidate?.resumeName || null,
-        jobRole: combinedRoleString,
+        jobRole: selectedRole.trim(),
         prompt: finalPrompt,
         topK: questionCount,
         documentIds: selectedDocs,
         twoRound: questionType === "both",
         questionType,
+        jobProfileId: selectedProfileId || undefined,
       });
       setResult(set);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -213,170 +254,89 @@ export default function Generate() {
           </div>
 
           <div className="mt-5 space-y-5">
-            {/* STEP 1: Select Candidate */}
+            {/* STEP 1: Select Job Role / Profile */}
             <div>
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                    1
-                  </span>
-                  Interview Candidate <span className="text-red-500">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowAddCandidate(true)}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700"
-                >
-                  <UserPlus size={12} /> Add Candidate
-                </button>
-              </div>
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
+                  1
+                </span>
+                Job Role <span className="text-red-500">*</span>
+              </label>
 
-              {candidates.length === 0 ? (
-                <div className="mt-2 rounded-lg border border-dashed border-amber-300 bg-amber-50/70 p-3 text-xs text-amber-800">
-                  No candidates yet. Add a candidate first.
-                </div>
-              ) : (
-                <div className="mt-2 space-y-2">
-                  {/* Candidate search */}
-                  <div className="relative">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
-                    <input
-                      type="text"
-                      placeholder="Search candidates..."
-                      value={candidateSearch}
-                      onChange={(e) => setCandidateSearch(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                    />
-                  </div>
+              <div className="mt-2 space-y-2">
+                {jobProfiles.length > 0 && (
+                  <>
+                    <div className="relative">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+                      <input
+                        type="text"
+                        placeholder="Search saved profiles..."
+                        value={roleSearch}
+                        onChange={(e) => setRoleSearch(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                      />
+                    </div>
 
-                  {/* Candidate list */}
-                  <div className="max-h-36 space-y-1 overflow-y-auto scroll-thin">
-                    {filteredCandidates.length === 0 ? (
-                      <p className="text-[11px] text-slate-400 py-2 text-center">No matches</p>
-                    ) : (
-                      filteredCandidates.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => { setSelectedCandidateId(c.id); setCandidateSearch(""); }}
-                          className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-xs transition cursor-pointer ${
-                            selectedCandidateId === c.id
-                              ? "border-brand-400 bg-brand-50 font-semibold"
-                              : "border-slate-200 bg-white hover:bg-slate-50"
-                          }`}
-                        >
-                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-                            selectedCandidateId === c.id ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300"
-                          }`}>
-                            {selectedCandidateId === c.id && <Check size={10} />}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <span className="block truncate font-semibold text-slate-800">{c.name}</span>
-                            <span className="block truncate text-[11px] text-slate-500">{c.targetRole}</span>
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-
-                  {selectedCandidate && (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-900">{selectedCandidate.name}</span>
-                        <span className="text-[11px] text-slate-500">{selectedCandidate.email}</span>
-                      </div>
-                      {selectedCandidate.resumeName && (
-                        <div className="mt-1.5 flex items-center gap-1.5 text-slate-700">
-                          <FileCheck2 size={13} className="text-brand-600 shrink-0" />
-                          <span className="truncate text-[11px] font-medium">{selectedCandidate.resumeName}</span>
-                        </div>
+                    <div className="max-h-36 space-y-1 overflow-y-auto scroll-thin">
+                      {filteredProfiles.length === 0 ? (
+                        <p className="text-[11px] text-slate-400 py-2 text-center">No matches</p>
+                      ) : (
+                        filteredProfiles.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedProfileId(p.id);
+                              setSelectedRole(p.name);
+                              setRoleSearch("");
+                            }}
+                            className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-xs transition cursor-pointer ${
+                              selectedProfileId === p.id
+                                ? "border-brand-400 bg-brand-50 font-semibold"
+                                : "border-slate-200 bg-white hover:bg-slate-50"
+                            }`}
+                          >
+                            <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                              selectedProfileId === p.id ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300"
+                            }`}>
+                              {selectedProfileId === p.id && <Check size={10} />}
+                            </span>
+                            <span className="truncate font-semibold text-slate-800">{p.name}</span>
+                          </button>
+                        ))
                       )}
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
+                  </>
+                )}
 
-            {/* STEP 2: Job Roles */}
-            <div className="border-t border-slate-100 pt-4">
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                    2
-                  </span>
-                  Job Roles <span className="text-red-500">*</span>
-                </label>
-                <span className="text-[11px] text-slate-400 font-medium">
-                  {selectedRoles.length} selected
-                </span>
-              </div>
-
-              {/* Active Roles */}
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedRoles.map((role) => (
-                  <span
-                    key={role}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white shadow-xs"
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Or type a job role..."
+                    value={selectedRole}
+                    onChange={(e) => {
+                      setSelectedRole(e.target.value);
+                      setSelectedProfileId("");
+                    }}
+                    className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateRole(true)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand-400 hover:text-brand-600 transition-colors shrink-0 cursor-pointer"
+                    title="Create new job profile with documents"
                   >
-                    <Briefcase size={12} />
-                    {role}
-                    <button
-                      type="button"
-                      onClick={() => removeRole(role)}
-                      className="rounded-full p-0.5 hover:bg-brand-700 text-brand-100 hover:text-white"
-                    >
-                      <X size={11} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-
-              {/* Preset Roles */}
-              <div className="mt-3">
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Quick Presets
-                </span>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {PRESET_ROLES.map((preset) => {
-                    const isSelected = selectedRoles.includes(preset);
-                    return (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => toggleRole(preset)}
-                        className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer ${
-                          isSelected
-                            ? "border-brand-500 bg-brand-50 text-brand-700 font-semibold"
-                            : "border-slate-200 bg-white text-slate-600 hover:border-brand-200 hover:bg-slate-50"
-                        }`}
-                      >
-                        {isSelected ? `✓ ${preset}` : `+ ${preset}`}
-                      </button>
-                    );
-                  })}
+                    <Plus size={13} /> New
+                  </button>
                 </div>
               </div>
-
-              {/* Custom Role */}
-              <form onSubmit={addCustomRole} className="mt-3 flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Add custom role..."
-                  value={customRoleInput}
-                  onChange={(e) => setCustomRoleInput(e.target.value)}
-                  className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                />
-                <Button type="submit" size="sm" variant="secondary" className="!px-3 !py-1.5">
-                  <Plus size={13} /> Add
-                </Button>
-              </form>
             </div>
 
-            {/* STEP 3: Prompt */}
+            {/* STEP 2: Prompt */}
             <div className="border-t border-slate-100 pt-4">
               <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                  3
+                  2
                 </span>
                 Prompt <span className="text-slate-400 font-normal">(optional)</span>
               </label>
@@ -401,45 +361,49 @@ export default function Generate() {
               </div>
             </div>
 
-            {/* STEP 4: Documents */}
+            {/* STEP 3: Documents (auto-loaded from profile) */}
             <div className="border-t border-slate-100 pt-4">
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                    4
+                    3
                   </span>
                   Documents <span className="text-red-500">*</span>
+                  {selectedDocs.length > 0 && (
+                    <span className="ml-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                      {selectedDocs.length} selected
+                    </span>
+                  )}
                 </label>
-                {allVisibleIndexed.length > 0 && (
+                {indexedDocs.length > 0 && (
                   <button
                     type="button"
                     onClick={selectAllDocs}
                     className="text-[11px] font-semibold text-brand-600 hover:text-brand-700"
                   >
-                    {allVisibleSelected ? "Deselect all" : "Select all"}
+                    {indexedDocs.every((d) => selectedDocs.includes(d.id)) ? "Deselect all" : "Select all"}
                   </button>
                 )}
               </div>
 
-              {/* Doc search */}
-              <div className="relative mt-2">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
-                <input
-                  type="text"
-                  placeholder="Search documents..."
-                  value={docSearch}
-                  onChange={(e) => setDocSearch(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                />
-              </div>
-
-              <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto scroll-thin pr-1">
-                {filteredDocs.length === 0 ? (
-                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                    No documents found.
-                  </p>
-                ) : (
-                  filteredDocs.map((d) => {
+              {!selectedProfileId ? (
+                <div className="mt-2 rounded-lg border border-dashed border-amber-300 bg-amber-50/70 p-3 text-xs text-amber-800">
+                  Select a job profile above to load its documents.
+                </div>
+              ) : loadingDocs ? (
+                <div className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+                  Loading documents...
+                </div>
+              ) : profileDocs.length === 0 ? (
+                <div className="mt-2 rounded-lg border border-dashed border-amber-300 bg-amber-50/70 p-3 text-xs text-amber-800">
+                  No documents uploaded for this profile yet.{" "}
+                  <a href={`/job-profiles/${selectedProfileId}/documents`} className="font-semibold underline">
+                    Upload documents
+                  </a>
+                </div>
+              ) : (
+                <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto scroll-thin pr-1">
+                  {profileDocs.map((d) => {
                     const isIndexed = d.status === "indexed";
                     const isSel = selectedDocs.includes(d.id);
                     return (
@@ -458,9 +422,7 @@ export default function Generate() {
                       >
                         <span
                           className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                            isSel
-                              ? "border-brand-600 bg-brand-600 text-white"
-                              : "border-slate-300"
+                            isSel ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300"
                           }`}
                         >
                           {isSel && <Check size={11} />}
@@ -476,25 +438,19 @@ export default function Generate() {
                         </span>
                       </button>
                     );
-                  })
-                )}
-              </div>
-              {selectedDocs.length > 0 && (
-                <p className="mt-1.5 text-[11px] text-slate-400">{selectedDocs.length} document{selectedDocs.length !== 1 ? "s" : ""} selected</p>
+                  })}
+                </div>
               )}
             </div>
 
-            {/* STEP 5: Question Type */}
+            {/* STEP 4: Question Type */}
             <div className="border-t border-slate-100 pt-4">
               <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                  5
+                  4
                 </span>
                 Question Type
               </label>
-              <p className="mt-0.5 text-[11px] text-slate-400">
-                Choose the style of questions to generate.
-              </p>
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {[
                   { value: "knowledge", label: "Knowledge", desc: "Concepts & policies" },
@@ -518,17 +474,14 @@ export default function Generate() {
               </div>
             </div>
 
-            {/* STEP 6: Number of Questions */}
+            {/* STEP 5: Number of Questions (slider only) */}
             <div className="border-t border-slate-100 pt-4">
               <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                  6
+                  5
                 </span>
                 Number of Questions
               </label>
-              <p className="mt-0.5 text-[11px] text-slate-400">
-                How many questions to generate per round.
-              </p>
               <div className="mt-3 flex items-center gap-4">
                 <span className="text-[11px] font-medium text-slate-400 w-6 text-center">2</span>
                 <div className="relative flex-1">
@@ -581,10 +534,7 @@ export default function Generate() {
       {(generating || result) && (
         <div className="lg:col-span-7 animate-fade-in-up">
           {generating && (
-            <GeneratingState
-              candidateName={selectedCandidate?.name || "Candidate"}
-              roles={selectedRoles}
-            />
+            <GeneratingState role={selectedRole || "Selected Role"} />
           )}
 
           {!generating && result && (
@@ -593,7 +543,7 @@ export default function Generate() {
                 onClick={() => setResult(null)}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:text-brand-700 mb-2"
               >
-                ← Back to setup
+                &larr; Back to setup
               </button>
               <ResultView
                 result={result}
@@ -604,19 +554,105 @@ export default function Generate() {
         </div>
       )}
 
-      <AddCandidateModal
-        open={showAddCandidate}
-        onClose={() => setShowAddCandidate(false)}
-        onCreated={() => setShowAddCandidate(false)}
-      />
+      {/* Inline Create Job Profile Modal */}
+      {showCreateRole && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl animate-fade-in-up">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                  <Briefcase size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">New Job Profile</h3>
+                  <p className="text-xs text-slate-500">Create a job role and optionally upload docs</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowCreateRole(false); setNewRoleName(""); setNewRoleFiles([]); }}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateRole} className="mt-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">
+                  Job Role Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. DevOps Intern"
+                  value={newRoleName}
+                  onChange={(e) => setNewRoleName(e.target.value)}
+                  className="mt-1.5 w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                />
+              </div>
+
+              {/* Optional file upload */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Documents <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setNewRoleDragging(true); }}
+                  onDragLeave={() => setNewRoleDragging(false)}
+                  onDrop={(e) => { e.preventDefault(); setNewRoleDragging(false); setNewRoleFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files)]); }}
+                  onClick={() => document.getElementById("inline-file-input")?.click()}
+                  className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-4 text-center transition-all ${
+                    newRoleDragging
+                      ? "border-brand-500 bg-brand-50"
+                      : "border-slate-200 bg-slate-50/50 hover:border-brand-400"
+                  }`}
+                >
+                  <input
+                    id="inline-file-input"
+                    type="file"
+                    multiple
+                    accept={ACCEPTED_DOCS}
+                    className="hidden"
+                    onChange={(e) => { setNewRoleFiles((prev) => [...prev, ...Array.from(e.target.files)]); e.target.value = ""; }}
+                  />
+                  <Upload size={18} className="text-slate-400" />
+                  <p className="mt-1.5 text-xs font-semibold text-slate-600">Drop files or click to browse</p>
+                  <p className="text-[10px] text-slate-400">PDF, DOCX, TXT, PPTX, images</p>
+                </div>
+                {newRoleFiles.length > 0 && (
+                  <div className="mt-2 space-y-1 max-h-24 overflow-y-auto scroll-thin">
+                    {newRoleFiles.map((f, i) => (
+                      <div key={`${f.name}-${i}`} className="flex items-center gap-2 rounded bg-white px-2.5 py-1 ring-1 ring-inset ring-slate-100">
+                        <FileText size={12} className="text-slate-400 shrink-0" />
+                        <span className="text-[11px] font-medium text-slate-700 truncate flex-1">{f.name}</span>
+                        <span className="text-[10px] text-slate-400">{formatBytes(f.size)}</span>
+                        <button type="button" onClick={() => setNewRoleFiles((prev) => prev.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-500 cursor-pointer"><X size={11} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <Button type="button" variant="secondary" size="sm" onClick={() => { setShowCreateRole(false); setNewRoleName(""); setNewRoleFiles([]); }}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={creatingRole}>
+                  {creatingRole ? "Creating..." : newRoleFiles.length > 0 ? "Create & Upload" : "Create Profile"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function GeneratingState({ candidateName, roles = [] }) {
-  const roleDisplay = roles.slice(0, 2).join(" & ");
+function GeneratingState({ role }) {
   const steps = [
-    `Analyzing profile for ${candidateName} (${roleDisplay})`,
+    `Analyzing requirements for ${role}`,
     "Searching across enterprise documentation",
     "Synthesizing grounded interview questions",
     "Classifying into Knowledge and Skill types",
@@ -628,7 +664,7 @@ function GeneratingState({ candidateName, roles = [] }) {
         Generating Interview Q&A...
       </div>
       <div className="mt-6 space-y-3.5">
-        {steps.map((s, i) => (
+        {steps.map((s) => (
           <div key={s} className="flex items-center gap-3 text-xs text-slate-600 font-medium">
             <span className="h-2 w-2 animate-pulse rounded-full bg-brand-500" />
             {s}
@@ -660,12 +696,7 @@ function ResultView({ result, onViewAll }) {
               </span>
               <span className="text-xs text-slate-400">{result.questions.length} questions</span>
             </div>
-            <h3 className="mt-2 text-lg font-bold text-slate-900">
-              {result.candidateName || result.jobRole}
-            </h3>
-            <p className="text-xs font-medium text-brand-600">
-              {result.candidateRole || result.jobRole}
-            </p>
+            <h3 className="mt-2 text-lg font-bold text-slate-900">{result.jobRole}</h3>
           </div>
           <Button variant="secondary" size="sm" onClick={onViewAll}>
             View All <ChevronRight size={14} />

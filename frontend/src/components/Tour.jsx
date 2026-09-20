@@ -20,30 +20,30 @@ const ALL_STEPS = [
   {
     route: "/",
     icon: LayoutDashboard,
-    title: "Candidate Assessment Dashboard",
+    title: "Interview Assessment Dashboard",
     body:
-      "This is your command center. Add interview candidates with their resumes, track indexed enterprise documents, and manage active candidate assessments.",
+      "This is your command center. Create job profiles, track indexed enterprise documents, and manage active interview kits.",
   },
   {
-    route: "/documents",
+    route: "/job-profiles",
     icon: FileText,
-    title: "Step 1 — Ingest Enterprise Documents",
+    title: "Step 1 -- Create Job Profiles & Upload Docs",
     body:
-      "Upload company manuals, coding guidelines, or policy files. Each file is parsed, chunked, embedded, and indexed so answers are strictly grounded in your internal knowledge base.",
+      "Create job profiles (e.g. DevOps Intern, Backend Developer) and upload enterprise documents to each profile. Documents are parsed, chunked, embedded, and indexed for grounded question generation.",
   },
   {
     route: "/generate",
     icon: Sparkles,
-    title: "Step 2 — Generate Candidate Q&A",
+    title: "Step 2 -- Generate Interview Q&A",
     body:
-      "Select an interview candidate and choose which enterprise documents to cross-reference against their profile. Click Generate to produce grounded Knowledge-Based and Skill-Based questions.",
+      "Select a job role and choose which enterprise documents to cross-reference. Click Generate to produce grounded Knowledge-Based and Skill-Based questions.",
   },
   {
     route: "/results",
     icon: ClipboardList,
-    title: "Step 3 — Review, Filter & Export",
+    title: "Step 3 -- Review, Filter & Export",
     body:
-      "Review questions by candidate, check grounding confidence and source chunk citations, filter by cognitive type (Knowledge vs Skill), rate questions, and export to JSON or CSV.",
+      "Review questions by role, check grounding confidence and source chunk citations, filter by cognitive type (Knowledge vs Skill), rate questions, and export to JSON or CSV.",
   },
   {
     route: "/admin",
@@ -58,7 +58,7 @@ const ALL_STEPS = [
     icon: CheckCircle2,
     title: "You're All Set!",
     body:
-      "Every generated answer is traceable to an enterprise document chunk, and candidate assessments are organized for seamless interviews.",
+      "Every generated answer is traceable to an enterprise document chunk, and interview kits are organized for seamless hiring.",
   },
 ];
 
@@ -86,7 +86,7 @@ export default function Tour() {
           <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
             <Sparkles size={22} />
           </div>
-          <h2 className="text-lg font-bold text-slate-900">Welcome to AssessIQ 👋</h2>
+          <h2 className="text-lg font-bold text-slate-900">Welcome to AssessIQ</h2>
           <p className="mt-2 text-sm leading-relaxed text-slate-600">
             New here? Take a quick one-minute tour to see how to upload documents and
             generate grounded, job-specific interview questions.

@@ -2,14 +2,13 @@ import { useState, useEffect } from "react";
 import { NavLink, Link, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
-  FileText,
   Sparkles,
   ClipboardList,
   ShieldCheck,
   Database,
   Shield,
   LogOut,
-  Users,
+  Briefcase,
   Compass,
   Settings,
   Loader2,
@@ -23,36 +22,32 @@ import Tour from "./Tour.jsx";
 
 const baseNav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/docs", label: "Docs Library", icon: FileText },
   { to: "/generate", label: "Generate Q&A", icon: Sparkles },
-  { to: "/candidates", label: "Candidates", icon: Users },
+  { to: "/job-profiles", label: "Job Profiles", icon: Briefcase },
   { to: "/results", label: "Results & Export", icon: ClipboardList },
 ];
 
 const titles = {
   "/": "Dashboard Overview",
-  "/docs": "Docs Library",
-  "/candidates": "Candidates",
+  "/job-profiles": "Job Profiles",
   "/generate": "Generate Q&A",
   "/results": "Results & Export",
   "/admin": "Admin Settings",
 };
 
 const subtitles = {
-  "/": "AI-powered interview intelligence, tailored to every candidate",
-  "/docs": "Upload and manage documents for interview grounding",
-  "/candidates": "Manage candidate profiles and interview history.",
-  "/generate": "Create custom interview kits by pairing resumes with technical docs",
+  "/": "AI-powered interview intelligence for every role",
+  "/job-profiles": "Manage job role templates and documents for interview assessments.",
+  "/generate": "Create custom interview kits by selecting a job role and enterprise docs",
   "/results": "Review, rate, and export generated question sets",
   "/admin": "Manage users, access permissions, and RAG hyperparameters",
 };
 
 export default function Layout() {
   const { pathname } = useLocation();
-  const { documents, candidates } = useApp();
+  const { jobProfiles } = useApp();
   const { user, setUser, logout } = useAuth();
   const { restart } = useTour();
-  const indexed = documents.filter((d) => d.status === "indexed").length;
   const nav =
     user?.role === "admin"
       ? [...baseNav, { to: "/admin", label: "Admin Settings", icon: Shield }]
@@ -150,17 +145,12 @@ export default function Layout() {
           <div className="rounded-lg bg-slate-50 p-2.5 text-xs space-y-1">
             <div className="flex items-center justify-between font-semibold text-slate-500">
               <span className="flex items-center gap-1.5">
-                <Database size={12} className="text-emerald-500" />
-                {indexed} Docs
-              </span>
-              <span className="text-slate-200">·</span>
-              <span className="flex items-center gap-1.5 text-slate-500">
-                <Users size={12} className="text-emerald-500" />
-                {candidates.length} Candidates
+                <Briefcase size={12} className="text-emerald-500" />
+                {jobProfiles.length} Profiles
               </span>
             </div>
             <p className="text-[10px] text-slate-400 leading-tight">
-              Strictly closed-domain · Zero hallucination
+              Strictly closed-domain &middot; Zero hallucination
             </p>
           </div>
 

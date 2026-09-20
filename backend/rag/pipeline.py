@@ -11,6 +11,7 @@ chunking stages, then layers embedding/retrieval/generation/classification on to
 
 from __future__ import annotations
 
+import random
 import uuid
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -52,6 +53,11 @@ class Question:
     confidence: float
     answerable: bool
     sources: List[Source] = field(default_factory=list)
+    sub_type: str = "direct"
+    options: List[str] = field(default_factory=list)
+    correct_option: int = 0
+    explanation: str = ""
+    expected_time_seconds: int = 60
 
 
 @dataclass
@@ -162,6 +168,12 @@ class RagPipeline:
 
         answerable = bool(qa.answerable) and grounding >= settings.answerability_threshold
         confidence = round(float(max(0.0, min(0.99, grounding))), 2)
+        sub_type = getattr(qa, "sub_type", "fundamentals")
+        _TIME_RANGES = {
+            "fundamentals": (20, 40), "understanding": (45, 75),
+            "apply": (60, 100), "analyse": (75, 120),
+        }
+        lo, hi = _TIME_RANGES.get(sub_type, (30, 100))
         return Question(
             id=f"q{idx}",
             question=qa.question,
@@ -170,6 +182,11 @@ class RagPipeline:
             confidence=confidence,
             answerable=answerable,
             sources=[source] if (source and answerable) else [],
+            sub_type=sub_type,
+            options=getattr(qa, "options", []) or ["Option A", "Option B", "Option C", "Option D"],
+            correct_option=getattr(qa, "correct_option", 0),
+            explanation=getattr(qa, "explanation", ""),
+            expected_time_seconds=random.randint(lo, hi),
         )
 
     def _generate_round(self, job_role, prompt, top_k, document_ids, n, category, start_idx):
@@ -178,7 +195,7 @@ class RagPipeline:
         query = f"{job_role}. {prompt}. {hint}".strip()
         contexts = self.retriever.retrieve(query, k=top_k, doc_ids=document_ids or None)
         best_score = max((c.score for c in contexts), default=0.0)
-        if not contexts or best_score < settings.answerability_threshold:
+        if not contexts:
             return [], best_score
 
         generator = get_generator()
@@ -211,6 +228,11 @@ class RagPipeline:
                     confidence=round(float(best_score), 2),
                     answerable=False,
                     sources=[],
+                    sub_type="fundamentals",
+                    options=["A", "B", "C", "D"],
+                    correct_option=0,
+                    explanation="No relevant context found.",
+                    expected_time_seconds=30,
                 )
             ],
         )

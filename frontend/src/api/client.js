@@ -12,7 +12,7 @@ import {
   mockDocuments,
   mockQASets,
   mockUsers,
-  mockCandidates,
+  mockJobProfiles,
   computeStats,
 } from "./mockData.js";
 
@@ -49,7 +49,7 @@ const uid = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).
 // -----------------------------------------------------------------------------
 function createMockClient() {
   let documents = mockDocuments.map((d) => ({ ...d }));
-  let candidates = mockCandidates.map((c) => ({ ...c }));
+  let jobProfiles = mockJobProfiles.map((p) => ({ ...p }));
   let qaSets = mockQASets.map((s) => ({ ...s, questions: s.questions.map((q) => ({ ...q })) }));
   let users = mockUsers.map((u) => ({ ...u }));
   let params = { defaultTopK: 6, questionsPerSet: 6, answerabilityThreshold: 0.18 };
@@ -102,60 +102,41 @@ function createMockClient() {
       return { ...params };
     },
 
-    // -- candidates --
-    async listCandidates() {
+    // -- job profiles --
+    async listJobProfiles() {
       await delay(150);
-      return candidates.map((c) => ({ ...c }));
+      return jobProfiles.map((p) => ({ ...p }));
     },
-    async createCandidate({ name, email, targetRole, resumeFile, skills, experienceYears, summary }) {
-      await delay(350);
-      const ext = resumeFile ? "." + (resumeFile.name.split(".").pop() || "").toLowerCase() : ".pdf";
-      const cand = {
-        id: uid("cand"),
+    async createJobProfile({ name }) {
+      await delay(250);
+      const profile = {
+        id: uid("jp"),
         name: name.trim(),
-        email: email?.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
-        targetRole: targetRole?.trim() || "Candidate",
-        resumeName: resumeFile ? resumeFile.name : `${name.replace(/\s+/g, "_")}_Resume.pdf`,
-        resumeExt: ext,
-        resumeSizeBytes: resumeFile ? resumeFile.size : 102400,
-        uploadedAt: new Date().toISOString(),
-        skills: skills?.length ? skills : ["Problem Solving", "Technical Communication", "Core Domain Concepts"],
-        experienceYears: experienceYears || 3,
-        summary: summary || `Experienced ${targetRole || "professional"} with a background in key domain capabilities.`,
+        createdAt: new Date().toISOString(),
       };
-      candidates = [cand, ...candidates];
-      return { ...cand };
+      jobProfiles = [profile, ...jobProfiles];
+      return { ...profile };
     },
-    async deleteCandidate(id) {
+    async deleteJobProfile(id) {
       await delay(150);
-      candidates = candidates.filter((c) => c.id !== id);
+      jobProfiles = jobProfiles.filter((p) => p.id !== id);
+      documents = documents.filter((d) => d.jobProfileId !== id);
       return { ok: true };
     },
-    async updateCandidate(id, data) {
-      await delay(200);
-      const idx = candidates.findIndex((c) => c.id === id);
-      if (idx >= 0) {
-        if (data.name) candidates[idx].name = data.name;
-        if (data.targetRole) candidates[idx].targetRole = data.targetRole;
-        if (data.email !== undefined) candidates[idx].email = data.email;
-        if (data.summary !== undefined) candidates[idx].summary = data.summary;
-        if (data.resumeFile) candidates[idx].resumeName = data.resumeFile.name;
-      }
-      return { ...candidates[idx] };
-    },
 
-    // -- documents --
-    async listDocuments() {
+    // -- documents (per profile) --
+    async listDocuments(profileId) {
       await delay(220);
-      return documents.map((d) => ({ ...d }));
+      return documents.filter((d) => d.jobProfileId === profileId).map((d) => ({ ...d }));
     },
-    async uploadDocument(file) {
+    async uploadDocument(profileId, file) {
       await delay(400);
       const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
       const doc = {
         id: uid("doc"), name: file.name, ext, sizeBytes: file.size || 0,
         status: "extracting", pages: 0, chunks: 0,
         uploadedAt: new Date().toISOString(), excerpt: "",
+        jobProfileId: profileId,
       };
       documents = [doc, ...documents];
       simulateIngestion(doc.id, (patch) => {
@@ -163,9 +144,9 @@ function createMockClient() {
       });
       return { ...doc };
     },
-    async deleteDocument(id) {
+    async deleteDocument(profileId, docId) {
       await delay(150);
-      documents = documents.filter((d) => d.id !== id);
+      documents = documents.filter((d) => d.id !== docId);
       return { ok: true };
     },
 
@@ -174,20 +155,18 @@ function createMockClient() {
       await delay(180);
       return qaSets.map((s) => ({ ...s, questions: s.questions.map((q) => ({ ...q })) }));
     },
-    async generateQA({ candidateId, candidateName, candidateRole, candidateResumeName, jobRole, prompt, topK, documentIds, twoRound }) {
+    async generateQA({ jobRole, prompt, topK, documentIds, twoRound, jobProfileId }) {
       await delay(1100);
+      const profileDocs = jobProfileId
+        ? documents.filter((d) => d.jobProfileId === jobProfileId)
+        : documents;
       const set = synthesizeQASet({
-        candidateId,
-        candidateName,
-        candidateRole,
-        candidateResumeName,
         jobRole,
         prompt,
         topK,
         documentIds,
         twoRound,
-        documents,
-        candidates,
+        documents: profileDocs,
       });
       qaSets = [set, ...qaSets];
       return { ...set };
@@ -209,7 +188,7 @@ function createMockClient() {
 
     async getStats() {
       await delay(120);
-      return computeStats(documents, qaSets, candidates);
+      return computeStats(qaSets, jobProfiles);
     },
   };
 }
@@ -246,22 +225,14 @@ function simulateIngestion(id, patch) {
 }
 
 function synthesizeQASet({
-  candidateId,
-  candidateName,
-  candidateRole,
-  candidateResumeName,
   jobRole,
   prompt,
   topK,
   documentIds = [],
   twoRound,
   documents = [],
-  candidates = [],
 }) {
-  const cand = candidates.find((c) => c.id === candidateId);
-  const finalCandidateName = candidateName || cand?.name || "General Candidate";
-  const finalRole = jobRole || cand?.targetRole || candidateRole || "Candidate";
-  const finalResumeName = candidateResumeName || cand?.resumeName || null;
+  const finalRole = jobRole || "General Role";
 
   const selected = documents.filter((d) => documentIds.includes(d.id) && d.status === "indexed");
   const pool = selected.length ? selected : documents.filter((d) => d.status === "indexed");
@@ -274,46 +245,208 @@ function synthesizeQASet({
     return words || "core system architecture";
   };
 
-  const knowledgeTemplates = [
-    (topic, role) => `What are the fundamental architectural principles, design trade-offs, and scalability bottlenecks associated with ${topic} when building systems for a ${role}?`,
-    (topic, role) => `When evaluating ${topic} in an enterprise pipeline, what key reliability standards and fault-tolerance mechanisms should be enforced?`,
-    (topic, role) => `How would you explain the underlying operational mechanics of ${topic}, and what security controls should be established for a ${role}?`,
-    (topic, role) => `What design patterns and concurrency trade-offs apply when implementing ${topic} in high-throughput microservices?`,
-  ];
+  // MCQ question banks — knowledge has fundamentals/understanding, skill has apply/analyse
+  const mcqBank = {
+    fundamentals: [
+      (topic, role) => ({
+        question: `Which protocol is primarily used for secure inter-service communication in ${topic}?`,
+        options: ["gRPC with TLS", "HTTP plain text", "FTP", "SMTP"],
+        correct_option: 0,
+        explanation: `gRPC with TLS provides encrypted, efficient binary communication between microservices, making it the standard for secure inter-service communication in ${topic} architectures.`,
+      }),
+      (topic, role) => ({
+        question: `What is the primary purpose of a load balancer in a ${topic} deployment?`,
+        options: ["Distribute traffic across instances", "Encrypt database queries", "Compile source code", "Manage Git repositories"],
+        correct_option: 0,
+        explanation: `Load balancers distribute incoming network traffic across multiple backend instances to ensure high availability, reliability, and prevent any single server from becoming a bottleneck.`,
+      }),
+      (topic, role) => ({
+        question: `Which data structure is most efficient for implementing an LRU cache in ${topic}?`,
+        options: ["Hash map + doubly linked list", "Binary search tree", "Array + queue", "Stack"],
+        correct_option: 0,
+        explanation: `An LRU cache combines a hash map for O(1) lookups with a doubly linked list for O(1) reordering, making it the optimal choice for cache eviction policies.`,
+      }),
+      (topic, role) => ({
+        question: `In ${topic}, what does the term "idempotency" refer to?`,
+        options: ["An operation produces the same result when called multiple times", "A system with no downtime", "A database with no locks", "A network with zero latency"],
+        correct_option: 0,
+        explanation: `Idempotency means that performing an operation multiple times has the same effect as performing it once. This is critical for retry safety in distributed systems.`,
+      }),
+    ],
+    understanding: [
+      (topic, role) => ({
+        question: `Why does ${topic} use eventual consistency instead of strong consistency for its data replication?`,
+        options: [
+          "It prioritizes availability and partition tolerance over immediate consistency",
+          "Strong consistency is too expensive in terms of hardware",
+          "Eventual consistency is the only option supported by all databases",
+          "It was an accidental design choice"
+        ],
+        correct_option: 0,
+        explanation: `Eventual consistency follows the CAP theorem trade-off: by relaxing consistency guarantees, the system achieves higher availability and better partition tolerance, which is essential for geographically distributed ${topic} systems.`,
+      }),
+      (topic, role) => ({
+        question: `How does the circuit breaker pattern prevent cascading failures in ${topic}?`,
+        options: [
+          "By short-circuiting requests to failing services and allowing recovery time",
+          "By retrying failed requests indefinitely",
+          "By caching all responses permanently",
+          "By increasing server capacity automatically"
+        ],
+        correct_option: 0,
+        explanation: `The circuit breaker monitors failure rates. When a threshold is exceeded, it opens the circuit and stops sending requests to the failing service, giving it time to recover while preventing the failure from propagating to dependent services.`,
+      }),
+      (topic, role) => ({
+        question: `What problem does service mesh solve that a traditional load balancer cannot in ${topic}?`,
+        options: [
+          "Fine-grained traffic control, mutual TLS, and observability at the pod level",
+          "Higher raw throughput for single connections",
+          "Simpler deployment configuration",
+          "Lower memory footprint"
+        ],
+        correct_option: 0,
+        explanation: `A service mesh operates at the application layer, providing per-service mTLS, retries, circuit breaking, and distributed tracing — capabilities that traditional L4 load balancers cannot deliver at the granularity needed for microservices.`,
+      }),
+      (topic, role) => ({
+        question: `Why is eventual consistency acceptable for a ${topic} analytics dashboard but not for a payment system?`,
+        options: [
+          "Analytics tolerate brief stale reads; payments require immediate consistency for correctness",
+          "Analytics are read-only; payments are write-only",
+          "Eventual consistency is faster for all systems",
+          "Payment systems don't use databases"
+        ],
+        correct_option: 0,
+        explanation: `Payment systems must guarantee immediate consistency to prevent double-charging or lost transactions. Analytics dashboards can tolerate seconds-old data without business impact, making eventual consistency a valid trade-off for better availability.`,
+      }),
+    ],
+    apply: [
+      (topic, role) => ({
+        question: `You notice a 10x latency spike in ${topic} during peak hours. What is your first diagnostic step?`,
+        options: [
+          "Check resource utilization metrics (CPU, memory, I/O) on affected instances",
+          "Restart all production servers immediately",
+          "Deploy a code hotfix without investigation",
+          "Disable monitoring alerts"
+        ],
+        correct_option: 0,
+        explanation: `The first step in troubleshooting is always to gather data. Checking resource utilization helps identify whether the issue is CPU-bound, memory-bound, I/O-bound, or network-related before taking action.`,
+      }),
+      (topic, role) => ({
+        question: `How would you implement a circuit breaker pattern for ${topic} external API calls?`,
+        options: [
+          "Track failure rates and open the circuit when threshold is exceeded, with periodic half-open probes",
+          "Retry failed requests indefinitely without any limit",
+          "Cache all responses permanently to avoid network calls",
+          "Use synchronous blocking calls for every request"
+        ],
+        correct_option: 0,
+        explanation: `A circuit breaker tracks consecutive failures. When the failure rate exceeds a threshold, it "opens" the circuit to prevent cascading failures. After a cooldown, it enters a half-open state to test if the service has recovered.`,
+      }),
+      (topic, role) => ({
+        question: `Given a requirement to migrate ${topic} to a new database with zero downtime, what strategy would you apply?`,
+        options: [
+          "Dual-write to both databases with shadow reads, then cutover after validation",
+          "Stop all traffic, migrate, and restart",
+          "Write a single SQL script to copy all data at once",
+          "Replace the database connection string and hope for the best"
+        ],
+        correct_option: 0,
+        explanation: `Zero-downtime migration requires dual-writing to both old and new databases simultaneously. Shadow reads validate data consistency before switching traffic, ensuring no data loss and no service interruption.`,
+      }),
+      (topic, role) => ({
+        question: `Your ${topic} service is experiencing race conditions under high concurrency. How would you fix this?`,
+        options: [
+          "Implement distributed locking with lease-based timeouts",
+          "Add more application servers",
+          "Reduce the logging level",
+          "Increase the thread pool size"
+        ],
+        correct_option: 0,
+        explanation: `Race conditions occur when concurrent operations access shared state without proper synchronization. Distributed locks with timeouts prevent deadlocks while ensuring only one operation can modify critical sections at a time.`,
+      }),
+    ],
+    analyse: [
+      (topic, role) => ({
+        question: `When comparing synchronous vs asynchronous communication for ${topic}, which trade-off is most critical?`,
+        options: [
+          "Latency vs throughput and system complexity",
+          "Memory usage vs CPU speed",
+          "Code readability vs execution time",
+          "Number of servers vs network bandwidth"
+        ],
+        correct_option: 0,
+        explanation: `Synchronous communication offers lower latency per request but limits throughput under load. Asynchronous messaging increases throughput and resilience but adds complexity in message ordering and error handling.`,
+      }),
+      (topic, role) => ({
+        question: `Why might a blue-green deployment strategy be preferred over rolling updates for ${topic} services?`,
+        options: [
+          "Instant rollback capability and zero-downtime guarantees",
+          "Lower infrastructure costs",
+          "Simpler database migration",
+          "Fewer servers required"
+        ],
+        correct_option: 0,
+        explanation: `Blue-green deployment maintains two identical environments, allowing instant traffic switching for rollback. While it requires double resources, it eliminates deployment risk and ensures zero downtime.`,
+      }),
+      (topic, role) => ({
+        question: `Analyse the impact of eventual consistency on ${topic} data replication. When is it acceptable?`,
+        options: [
+          "When stale reads are tolerable and availability is prioritized",
+          "When strong consistency is legally required",
+          "When the dataset fits in memory",
+          "When write throughput is low"
+        ],
+        correct_option: 0,
+        explanation: `Eventual consistency trades immediate consistency for higher availability and partition tolerance. It's acceptable when users can tolerate brief periods of stale data, such as in social media feeds or analytics dashboards.`,
+      }),
+      (topic, role) => ({
+        question: `What are the key factors to analyse when choosing between ${topic} and alternative solutions?`,
+        options: [
+          "Scalability requirements, team expertise, and operational complexity",
+          "Only the license cost",
+          "The programming language used",
+          "The number of developers on the team"
+        ],
+        correct_option: 0,
+        explanation: `Technology selection should consider scalability needs, existing team skills, operational overhead, community support, and long-term maintenance costs rather than any single factor.`,
+      }),
+    ],
+  };
 
-  const skillTemplates = [
-    (topic, role, name) => `Suppose ${name} encounters a critical latency spike or thread deadlock involving ${topic} in production. What step-by-step troubleshooting protocol should be followed to resolve it?`,
-    (topic, role, name) => `How would you design a zero-downtime deployment and automated rollback strategy for a service heavily reliant on ${topic}?`,
-    (topic, role, name) => `If ${name} is tasked with refactoring a legacy service into asynchronous event-driven workers using ${topic}, what API contracts and retry mechanisms should be implemented?`,
-    (topic, role, name) => `In a high-concurrency environment where message delivery or cache keys fail, how would you configure ${topic} to ensure eventual consistency and zero data loss?`,
-  ];
+  const timeRanges = { fundamentals: [20, 40], understanding: [45, 75], apply: [60, 100], analyse: [75, 120] };
+  const randInt = (lo, hi) => Math.floor(Math.random() * (hi - lo + 1)) + lo;
 
+  const subTypesByType = {
+    knowledge: ["fundamentals", "understanding"],
+    skill: ["apply", "analyse"],
+  };
   const mk = (d, type, i) => {
     const topic = extractTopic(d.name, d.excerpt);
-    const qText =
-      type === "knowledge"
-        ? knowledgeTemplates[i % knowledgeTemplates.length](topic, finalRole)
-        : skillTemplates[i % skillTemplates.length](topic, finalRole, finalCandidateName);
-
-    const aText =
-      type === "knowledge"
-        ? `Core Technical Solution:\nThe enterprise standard for ${topic} specifies strict operational compliance, resource boundaries, and verified architectural patterns. ${d.excerpt || ""}\n\nKey Evaluation Criteria for Interviewer:\n• Candidate must explain architectural trade-offs, state management, and memory limits for ${topic}.\n• Candidate should specify security controls, authorization standards, and compliance verification.\n• Candidate must articulate performance metrics and high-availability SLAs for a ${finalRole}.`
-        : `Core Technical Solution:\nWhen handling ${topic} as a ${finalRole}, the candidate should implement automated health checks, idempotency keys, explicit circuit breakers, and trace header propagation.\n\nKey Evaluation Criteria for Interviewer:\n• Candidate must outline a step-by-step diagnostic workflow for troubleshooting latency spikes or failure modes.\n• Candidate should describe zero-downtime deployment and automated rollback strategies.\n• Candidate should articulate retry backoff logic and eventual consistency guarantees.`;
+    const pool = subTypesByType[type] || ["fundamentals", "understanding", "apply", "analyse"];
+    const subType = pool[i % pool.length];
+    const bank = mcqBank[subType];
+    const qData = bank[i % bank.length](topic, finalRole);
+    const [lo, hi] = timeRanges[subType];
 
     return {
       id: `q${i}`,
-      question: qText,
-      answer: aText,
+      question: qData.question,
+      answer: qData.explanation,
       type,
+      sub_type: subType,
       confidence: Number((0.78 + Math.random() * 0.19).toFixed(2)),
       answerable: true,
       rating: null,
+      options: qData.options,
+      correct_option: qData.correct_option,
+      explanation: qData.explanation,
+      expected_time_seconds: randInt(lo, hi),
       sources: [
         {
           docId: d.id,
           docName: d.name,
           chunkId: Math.floor(Math.random() * (d.chunks || 30)) + 1,
-          snippet: (d.excerpt || "Indexed enterprise documentation passage.").slice(0, 140) + "…",
+          snippet: (d.excerpt || "Indexed enterprise documentation passage.").slice(0, 140) + "...",
         },
       ],
     };
@@ -336,7 +469,7 @@ function synthesizeQASet({
     questions = [
       {
         id: "q1",
-        question: `No indexed documents were available to ground questions for ${finalCandidateName} (${finalRole}).`,
+        question: `No indexed documents were available to ground questions for ${finalRole}.`,
         answer: "This question cannot be answered: upload and index enterprise documents first.",
         type: "knowledge",
         confidence: 0.2,
@@ -349,12 +482,8 @@ function synthesizeQASet({
 
   return {
     id: uid("set"),
-    candidateId: candidateId || cand?.id || null,
-    candidateName: finalCandidateName,
-    candidateRole: finalRole,
-    candidateResumeName: finalResumeName,
     jobRole: finalRole,
-    prompt: prompt || `Generate interview questions for ${finalCandidateName} (${finalRole}).`,
+    prompt: prompt || `Generate interview questions for ${finalRole}.`,
     topK: topK || 6,
     twoRound: !!twoRound,
     createdAt: new Date().toISOString(),
@@ -403,50 +532,23 @@ function createHttpClient() {
     getParams: () => req("/api/admin/params"),
     setParams: (patch) => req("/api/admin/params", { method: "PUT", body: JSON.stringify(patch) }),
 
-    // candidates
-    listCandidates: () => req("/api/candidates").catch(() => mockCandidates),
-    createCandidate: (data) =>
-      req("/api/candidates", { method: "POST", body: JSON.stringify(data) }).catch(() => {
-        const ext = data.resumeFile ? "." + (data.resumeFile.name.split(".").pop() || "").toLowerCase() : ".pdf";
-        return {
-          id: uid("cand"),
-          name: data.name,
-          email: data.email || `${data.name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
-          targetRole: data.targetRole,
-          resumeName: data.resumeFile ? data.resumeFile.name : `${data.name}_Resume.pdf`,
-          resumeExt: ext,
-          resumeSizeBytes: data.resumeFile?.size || 102400,
-          uploadedAt: new Date().toISOString(),
-          skills: data.skills || ["Core Skills"],
-          summary: data.summary || "Candidate profile",
-        };
-      }),
-    deleteCandidate: (id) => req(`/api/candidates/${id}`, { method: "DELETE" }).catch(() => ({ ok: true })),
-    updateCandidate: (id, data) => {
-      const form = new FormData();
-      if (data.name) form.append("name", data.name);
-      if (data.targetRole) form.append("targetRole", data.targetRole);
-      if (data.email !== undefined) form.append("email", data.email);
-      if (data.summary !== undefined) form.append("summary", data.summary);
-      if (data.resumeFile) form.append("resume", data.resumeFile);
-      const token = tokenStore.get();
-      return fetch(`${BASE_URL}/api/candidates/${id}`, {
-        method: "PUT",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: form,
-      }).then((r) => {
-        if (!r.ok) throw new Error(`Update failed: ${r.status}`);
-        return r.json();
-      });
-    },
+    // job profiles
+    listJobProfiles: () => req("/api/job-profiles").catch(() => mockJobProfiles),
+    createJobProfile: (data) =>
+      req("/api/job-profiles", { method: "POST", body: JSON.stringify(data) }).catch(() => ({
+        id: uid("jp"),
+        name: data.name,
+        createdAt: new Date().toISOString(),
+      })),
+    deleteJobProfile: (id) => req(`/api/job-profiles/${id}`, { method: "DELETE" }).catch(() => ({ ok: true })),
 
-    // documents
-    listDocuments: () => req("/api/documents"),
-    uploadDocument: (file) => {
+    // documents (per profile)
+    listDocuments: (profileId) => req(`/api/job-profiles/${profileId}/documents`),
+    uploadDocument: (profileId, file) => {
       const form = new FormData();
       form.append("file", file);
       const token = tokenStore.get();
-      return fetch(`${BASE_URL}/api/documents`, {
+      return fetch(`${BASE_URL}/api/job-profiles/${profileId}/documents`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: form,
@@ -455,8 +557,8 @@ function createHttpClient() {
         return r.json();
       });
     },
-    deleteDocument: (id) => req(`/api/documents/${id}`, { method: "DELETE" }).then(() => ({ ok: true })),
-    getDocChunks: (docId) => req(`/api/documents/${docId}/chunks`),
+    deleteDocument: (profileId, docId) => req(`/api/job-profiles/${profileId}/documents/${docId}`, { method: "DELETE" }).then(() => ({ ok: true })),
+    getDocChunks: (profileId, docId) => req(`/api/job-profiles/${profileId}/documents/${docId}/chunks`),
 
     // qa sets
     listQASets: () => req("/api/qa-sets"),
@@ -477,4 +579,3 @@ const api = MODE === "real" ? createHttpClient() : createMockClient();
 export const apiMode = MODE;
 export const apiBaseUrl = BASE_URL;
 export default api;
-

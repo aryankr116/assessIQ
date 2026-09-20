@@ -76,7 +76,7 @@ class Settings:
     # Min cosine similarity for a chunk to count as relevant. Below this the
     # prompt is treated as out-of-scope (answerability gate).
     answerability_threshold: float = float(
-        os.getenv("ASSESSIQ_ANSWERABILITY_THRESHOLD", "0.18")
+        os.getenv("ASSESSIQ_ANSWERABILITY_THRESHOLD", "0.05")
     )
 
     # --- Generation provider --------------------------------------------

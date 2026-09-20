@@ -9,7 +9,9 @@ import {
   Trash2,
   Clock,
   Layers,
-  CheckCircle2,
+  Zap,
+  Brain,
+  Lightbulb,
   BookOpen,
 } from "lucide-react";
 import { useApp } from "../context/AppContext.jsx";
@@ -54,7 +56,7 @@ export default function Results() {
     sorted.find((s) => s.id === activeId) || sorted[0] || null;
 
   async function handleDelete(setId) {
-    if (!window.confirm("Delete this candidate assessment set? This cannot be undone.")) return;
+    if (!window.confirm("Delete this interview kit? This cannot be undone.")) return;
     await deleteQASet(setId);
     if (activeId === setId) {
       const remaining = sorted.filter((s) => s.id !== setId);
@@ -83,7 +85,7 @@ export default function Results() {
     return (
       <EmptyState
         icon={ClipboardList}
-        title="No candidate assessments generated yet"
+        title="No interview kits generated yet"
         action={
           <Link to="/generate">
             <Button>
@@ -92,7 +94,7 @@ export default function Results() {
           </Link>
         }
       >
-        Generated question sets for candidates will appear here for review, cognitive
+        Generated question sets will appear here for review, cognitive
         filtering, and export.
       </EmptyState>
     );
@@ -101,15 +103,19 @@ export default function Results() {
   const knCount = active ? (active.questions || []).filter((q) => q.type === "knowledge").length : 0;
   const skCount = active ? (active.questions || []).filter((q) => q.type === "skill").length : 0;
   const oosCount = active ? (active.questions || []).filter((q) => !q.answerable).length : 0;
+  const fundamentalsCount = active ? (active.questions || []).filter((q) => (q.subType || q.sub_type) === "fundamentals").length : 0;
+  const understandingCount = active ? (active.questions || []).filter((q) => (q.subType || q.sub_type) === "understanding").length : 0;
+  const applyCount = active ? (active.questions || []).filter((q) => (q.subType || q.sub_type) === "apply").length : 0;
+  const analyseCount = active ? (active.questions || []).filter((q) => (q.subType || q.sub_type) === "analyse").length : 0;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 animate-fade-in-up">
-      {/* Candidate Question Sets List (4 Cols) */}
+      {/* Interview Kits List (4 Cols) */}
       <div className="lg:col-span-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <ClipboardList size={16} className="text-brand-600" />
-            Candidate Question Sets
+            Interview Kits
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 font-semibold">
               {sorted.length}
             </span>
@@ -125,8 +131,7 @@ export default function Results() {
         <div className="space-y-2 max-h-[calc(100vh-14rem)] overflow-y-auto scroll-thin pr-1">
           {sorted.map((set) => {
             const isActive = set.id === active?.id;
-            const candidateName = set.candidateName || "Unnamed";
-            const candidateRole = set.candidateRole || set.jobRole || "No Role";
+            const jobRole = set.jobRole || "General Role";
             const qCount = (set.questions || []).length;
 
             return (
@@ -147,16 +152,12 @@ export default function Results() {
                         : "bg-slate-100 text-slate-700"
                     }`}
                   >
-                    {candidateName.slice(0, 2).toUpperCase()}
+                    {jobRole.slice(0, 2).toUpperCase()}
                   </div>
 
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-bold text-slate-900">
-                      {candidateName}
-                    </div>
-
-                    <div className="truncate text-xs font-medium text-slate-500 mt-0.5">
-                      {candidateRole}
+                      {jobRole}
                     </div>
 
                     <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 font-medium">
@@ -173,7 +174,7 @@ export default function Results() {
         </div>
       </div>
 
-      {/* Selected Assessment Detail View (8 Cols) */}
+      {/* Selected Kit Detail View (8 Cols) */}
       <div className="lg:col-span-8 space-y-4">
         {active && (
           <>
@@ -182,25 +183,21 @@ export default function Results() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-start gap-3.5 min-w-0">
                   <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 text-base font-bold border border-brand-200">
-                    {(active.candidateName || active.jobRole).slice(0, 2).toUpperCase()}
+                    {(active.jobRole || "QR").slice(0, 2).toUpperCase()}
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h2 className="truncate text-lg font-bold text-slate-900">
-                        {active.candidateName || active.jobRole}
+                        {active.jobRole}
                       </h2>
                       <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-[11px] font-semibold text-brand-700 border border-brand-200">
-                        Candidate Assessment
+                        Interview Kit
                       </span>
                     </div>
 
-                    <p className="mt-1 text-xs font-semibold text-slate-600">
-                      Target Role: <span className="text-brand-700">{active.candidateRole || active.jobRole}</span>
-                    </p>
-
                     {active.prompt && (
                       <p className="mt-2 text-xs text-slate-500 line-clamp-2 italic bg-slate-50 p-2 rounded-lg border border-slate-100">
-                        "{active.prompt}"
+                        &ldquo;{active.prompt}&rdquo;
                       </p>
                     )}
 
@@ -208,7 +205,7 @@ export default function Results() {
                       <span className="inline-flex items-center gap-1 text-slate-500">
                         <Clock size={13} className="text-brand-600" /> {formatDateTime(active.createdAt)}
                       </span>
-                      <span>·</span>
+                      <span>&middot;</span>
                       <span className="inline-flex items-center gap-1 text-slate-500">
                         <Layers size={13} className="text-brand-600" /> {active.documentIds?.length || 0} source documents
                       </span>
@@ -237,7 +234,7 @@ export default function Results() {
                     variant="danger"
                     size="sm"
                     onClick={() => handleDelete(active.id)}
-                    title="Delete this candidate set"
+                    title="Delete this kit"
                   >
                     <Trash2 size={14} />
                   </Button>
@@ -247,10 +244,23 @@ export default function Results() {
               {/* Cognitive Summary Metrics */}
               <div className="mt-4 pt-3.5 border-t border-slate-100 flex flex-wrap items-center gap-3.5 text-xs font-semibold">
                 <span className="inline-flex items-center gap-1.5 text-slate-700">
-                  <TypeBadge type="knowledge" size="sm" /> {knCount} Questions
+                  <TypeBadge type="knowledge" size="sm" /> {knCount} Knowledge
                 </span>
                 <span className="inline-flex items-center gap-1.5 text-slate-700">
-                  <TypeBadge type="skill" size="sm" /> {skCount} Questions
+                  <TypeBadge type="skill" size="sm" /> {skCount} Skill
+                </span>
+                <span className="text-slate-300">|</span>
+                <span className="inline-flex items-center gap-1 text-sky-600">
+                  <BookOpen size={12} /> {fundamentalsCount} Fundamentals
+                </span>
+                <span className="inline-flex items-center gap-1 text-indigo-600">
+                  <Brain size={12} /> {understandingCount} Understanding
+                </span>
+                <span className="inline-flex items-center gap-1 text-purple-600">
+                  <Zap size={12} /> {applyCount} Apply
+                </span>
+                <span className="inline-flex items-center gap-1 text-amber-600">
+                  <Lightbulb size={12} /> {analyseCount} Analyse
                 </span>
                 {oosCount > 0 && (
                   <span className="inline-flex items-center gap-1.5 text-slate-700">
@@ -302,7 +312,7 @@ export default function Results() {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search questions & answers…"
+                  placeholder="Search questions & answers..."
                   className="w-full sm:w-64 rounded-lg border border-slate-300 bg-white py-1.5 pl-8.5 pr-3 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
                 />
               </div>

@@ -7,7 +7,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import api, { apiMode } from "../api/client.js";
 import { LogoMark, FullLogo } from "../components/Logo.jsx";
 
-const GOOGLE_CLIENT_ID = "438380772420-ogp6gn91h64ruvvlit0h8guo3vfve9ee.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
 
 function FeatureCard({ icon: Icon, title, description }) {
   return (
@@ -40,27 +40,50 @@ export default function Login() {
   const [forgotBusy, setForgotBusy] = useState(false);
   const [forgotError, setForgotError] = useState("");
   const googleBtnRef = useRef(null);
+  const googleInitRef = useRef(false);
 
-  // Initialize Google Identity Services
+  // Initialize Google Identity Services when the SDK becomes available.
   useEffect(() => {
-    if (typeof window.google === "undefined") return;
+    if (!GOOGLE_CLIENT_ID) return;
 
-    window.google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleGoogleCredential,
-      auto_select: false,
-      cancel_on_tap_outside: true,
-    });
+    let retryTimer;
+    let cancelled = false;
 
-    if (googleBtnRef.current) {
-      window.google.accounts.id.renderButton(googleBtnRef.current, {
-        theme: "outline",
-        size: "large",
-        width: "100%",
-        text: "signin_with",
-        shape: "rectangular",
+    const initGoogleAuth = () => {
+      if (cancelled) return;
+
+      if (typeof window.google === "undefined" || !window.google.accounts?.id) {
+        retryTimer = window.setTimeout(initGoogleAuth, 250);
+        return;
+      }
+
+      if (googleInitRef.current) return;
+      googleInitRef.current = true;
+
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCredential,
+        auto_select: false,
+        cancel_on_tap_outside: true,
       });
-    }
+
+      if (googleBtnRef.current) {
+        window.google.accounts.id.renderButton(googleBtnRef.current, {
+          theme: "outline",
+          size: "large",
+          width: "100%",
+          text: "signin_with",
+          shape: "rectangular",
+        });
+      }
+    };
+
+    initGoogleAuth();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
+    };
   }, []);
 
   async function handleGoogleCredential(response) {
@@ -316,7 +339,11 @@ export default function Login() {
           </div>
 
           {/* Google Sign In */}
-          {googleBusy ? (
+          {!GOOGLE_CLIENT_ID ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+              Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID in frontend/.env.
+            </div>
+          ) : googleBusy ? (
             <div className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white py-2.5 text-sm font-semibold text-slate-500">
               <Loader2 size={16} className="animate-spin" /> Signing in with Google...
             </div>

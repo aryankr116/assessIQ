@@ -88,14 +88,21 @@ class PptxExtractor(BaseExtractor):
         except Exception as e:
             raise RuntimeError("Missing dependency: python-pptx (install via requirements)") from e
 
-        prs = Presentation(path)
+        try:
+            prs = Presentation(path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to open PPTX file: {e}") from e
+
         texts: List[str] = []
         for slide in prs.slides:
             for shape in slide.shapes:
-                if hasattr(shape, "text"):
-                    txt = shape.text
-                    if txt:
-                        texts.append(txt)
+                try:
+                    if hasattr(shape, "text"):
+                        txt = shape.text
+                        if txt and txt.strip():
+                            texts.append(txt)
+                except Exception:
+                    continue
         return "\n".join(texts)
 
 

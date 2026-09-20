@@ -35,8 +35,8 @@ from .schemas import (
     AuthResponse,
     User,
     SystemParams,
-    Candidate,
-    CandidateCreateRequest,
+    JobProfile,
+    JobProfileCreateRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
     ChangePasswordRequest,
@@ -47,7 +47,7 @@ from . import auth
 
 app = FastAPI(title="AssessIQ API", version="1.0.0")
 
-GOOGLE_CLIENT_ID = "438380772420-ogp6gn91h64ruvvlit0h8guo3vfve9ee.apps.googleusercontent.com"
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 
 app.add_middleware(
     CORSMiddleware,
@@ -105,6 +105,12 @@ def login(req: LoginRequest):
 @app.post("/api/auth/google")
 def google_login(req: GoogleLoginRequest):
     """Authenticate via Google OAuth ID token."""
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            503,
+            "Google OAuth is not configured on this server. Set GOOGLE_CLIENT_ID in the backend environment.",
+        )
+
     try:
         from google.oauth2 import id_token
         from google.auth.transport import requests as google_requests
@@ -227,84 +233,35 @@ def set_params(patch: dict, _: dict = Depends(auth.require_admin)):
     return get_store().update_params(patch)
 
 
-# --- Candidates ----------------------------------------------------------
-@app.get("/api/candidates")
-def list_candidates():
-    return get_store().list_candidates()
+# --- Job Profiles --------------------------------------------------------
+@app.get("/api/job-profiles")
+def list_job_profiles():
+    return get_store().list_job_profiles()
 
 
-@app.post("/api/candidates")
-def create_candidate(req: CandidateCreateRequest, _: dict = Depends(auth.require_user)):
+@app.post("/api/job-profiles")
+def create_job_profile(req: JobProfileCreateRequest, _: dict = Depends(auth.require_user)):
     store = get_store()
-    candidate_id = "cand_" + uuid.uuid4().hex[:10]
-    candidate = Candidate(
-        id=candidate_id,
+    profile_id = "jp_" + uuid.uuid4().hex[:10]
+    profile = JobProfile(
+        id=profile_id,
         name=req.name,
-        email=req.email or f"{req.name.lower().replace(' ', '.')}@example.com",
-        target_role=req.target_role,
-        resume_name=req.resume_name or f"{req.name.lower().replace(' ', '_')}_resume.pdf",
-        resume_ext=req.resume_ext or ".pdf",
-        resume_size_bytes=req.resume_size_bytes or 0,
-        uploaded_at=_now_iso(),
-        skills=req.skills or [],
-        experience_years=req.experience_years or 0,
-        summary=req.summary or "",
+        created_at=_now_iso(),
     ).model_dump(by_alias=True)
-    store.upsert_candidate(candidate)
-    return candidate
+    store.upsert_job_profile(profile)
+    return profile
 
 
-@app.put("/api/candidates/{candidate_id}")
-def update_candidate(
-    candidate_id: str,
-    name: str = Form(None),
-    targetRole: str = Form(None),
-    email: str = Form(None),
-    summary: str = Form(None),
-    resume: UploadFile = File(None),
-    _: dict = Depends(auth.require_user),
-):
-    store = get_store()
-    candidates = store.list_candidates()
-    existing = next((c for c in candidates if c["id"] == candidate_id), None)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-
-    if name is not None:
-        existing["name"] = name
-    if targetRole is not None:
-        existing["targetRole"] = targetRole
-    if email is not None:
-        existing["email"] = email
-    if summary is not None:
-        existing["summary"] = summary
-
-    if resume and resume.filename:
-        uploads = settings.data_dir / "uploads"
-        uploads.mkdir(parents=True, exist_ok=True)
-        ext = "." + resume.filename.rsplit(".", 1)[-1].lower() if "." in resume.filename else ".pdf"
-        dest = uploads / f"{candidate_id}{ext}"
-        with open(dest, "wb") as f:
-            shutil.copyfileobj(resume.file, f)
-        existing["resumeName"] = resume.filename
-        existing["resumeExt"] = ext
-        existing["resumeSizeBytes"] = dest.stat().st_size
-
-    existing["updatedAt"] = _now_iso()
-    store.upsert_candidate(existing)
-    return existing
-
-
-@app.delete("/api/candidates/{candidate_id}", status_code=204)
-def delete_candidate(candidate_id: str, _: dict = Depends(auth.require_user)):
-    get_store().delete_candidate(candidate_id)
+@app.delete("/api/job-profiles/{profile_id}", status_code=204)
+def delete_job_profile(profile_id: str, _: dict = Depends(auth.require_user)):
+    get_store().delete_job_profile(profile_id)
     return None
 
 
 # --- Documents -----------------------------------------------------------
-@app.get("/api/documents")
-def list_documents():
-    return get_store().list_documents()
+@app.get("/api/job-profiles/{profile_id}/documents")
+def list_profile_documents(profile_id: str):
+    return get_store().list_documents(job_profile_id=profile_id)
 
 
 def _ingest_in_background(doc_id: str, path: str, name: str):
@@ -343,8 +300,9 @@ def _ingest_in_background(doc_id: str, path: str, name: str):
     store.persist()
 
 
-@app.post("/api/documents")
+@app.post("/api/job-profiles/{profile_id}/documents")
 async def upload_document(
+    profile_id: str,
     background: BackgroundTasks,
     file: UploadFile = File(...),
     _: dict = Depends(auth.require_user),
@@ -369,6 +327,7 @@ async def upload_document(
         size_bytes=size,
         status="extracting",
         uploaded_at=_now_iso(),
+        job_profile_id=profile_id,
     ).model_dump(by_alias=True)
     store.upsert_document(doc)
 
@@ -377,14 +336,14 @@ async def upload_document(
     return doc
 
 
-@app.delete("/api/documents/{doc_id}", status_code=204)
-def delete_document(doc_id: str, _: dict = Depends(auth.require_user)):
+@app.delete("/api/job-profiles/{profile_id}/documents/{doc_id}", status_code=204)
+def delete_document(profile_id: str, doc_id: str, _: dict = Depends(auth.require_user)):
     get_store().delete_document(doc_id)
     return None
 
 
-@app.get("/api/documents/{doc_id}/file")
-def get_document_file(doc_id: str):
+@app.get("/api/job-profiles/{profile_id}/documents/{doc_id}/file")
+def get_document_file(profile_id: str, doc_id: str):
     """Serve the raw document file."""
     from fastapi.responses import FileResponse
     uploads = (settings.data_dir / "uploads").resolve()
@@ -397,8 +356,8 @@ def get_document_file(doc_id: str):
     return FileResponse(path, media_type=mime, content_disposition_type="inline")
 
 
-@app.get("/api/documents/{doc_id}/chunks")
-def get_document_chunks(doc_id: str):
+@app.get("/api/job-profiles/{profile_id}/documents/{doc_id}/chunks")
+def get_document_chunks(profile_id: str, doc_id: str):
     """Get text chunks for a document (from vector store)."""
     store = get_store()
     records = store.pipeline.store.records
@@ -433,9 +392,6 @@ def generate_qa(req: GenerateRequest, _: dict = Depends(auth.require_user)):
     qa_set = QASet(
         id="set_" + uuid.uuid4().hex[:10],
         job_role=result.job_role,
-        candidate_id=req.candidate_id,
-        candidate_name=req.candidate_name,
-        candidate_role=req.candidate_role,
         prompt=result.prompt,
         top_k=result.top_k,
         created_at=_now_iso(),
@@ -446,6 +402,7 @@ def generate_qa(req: GenerateRequest, _: dict = Depends(auth.require_user)):
                 question=q.question,
                 answer=q.answer,
                 type=q.type,
+                sub_type=q.sub_type,
                 confidence=q.confidence,
                 answerable=q.answerable,
                 sources=[
@@ -457,6 +414,10 @@ def generate_qa(req: GenerateRequest, _: dict = Depends(auth.require_user)):
                     )
                     for s in q.sources
                 ],
+                options=q.options,
+                correct_option=q.correct_option,
+                explanation=q.explanation,
+                expected_time_seconds=q.expected_time_seconds,
             )
             for q in result.questions
         ],

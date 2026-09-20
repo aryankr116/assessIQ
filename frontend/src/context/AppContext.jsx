@@ -1,24 +1,46 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import api from "../api/client.js";
 
 const AppContext = createContext(null);
 
+// Persisted Generate page state (survives navigation)
+const GENERATE_STORAGE_KEY = "assessiq_generate_state";
+
+function loadGenerateState() {
+  try {
+    const raw = localStorage.getItem(GENERATE_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return null;
+}
+
+function saveGenerateState(state) {
+  try {
+    localStorage.setItem(GENERATE_STORAGE_KEY, JSON.stringify(state));
+  } catch { /* ignore */ }
+}
+
 export function AppProvider({ children }) {
-  const [documents, setDocuments] = useState([]);
-  const [candidates, setCandidates] = useState([]);
+  const [jobProfiles, setJobProfiles] = useState([]);
   const [qaSets, setQaSets] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const refreshDocuments = useCallback(async () => {
-    const docs = await api.listDocuments();
-    setDocuments(docs);
-    return docs;
+  // Generate page state persistence
+  const [generateState, setGenerateStateRaw] = useState(loadGenerateState);
+  const generateStateRef = useRef(generateState);
+  const setGenerateState = useCallback((updater) => {
+    setGenerateStateRaw((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      generateStateRef.current = next;
+      saveGenerateState(next);
+      return next;
+    });
   }, []);
 
-  const refreshCandidates = useCallback(async () => {
-    const cands = await api.listCandidates();
-    setCandidates(cands);
-    return cands;
+  const refreshJobProfiles = useCallback(async () => {
+    const profiles = await api.listJobProfiles();
+    setJobProfiles(profiles);
+    return profiles;
   }, []);
 
   const refreshQaSets = useCallback(async () => {
@@ -31,14 +53,12 @@ export function AppProvider({ children }) {
     let active = true;
     (async () => {
       setLoading(true);
-      const [docs, cands, sets] = await Promise.all([
-        api.listDocuments(),
-        api.listCandidates(),
+      const [profiles, sets] = await Promise.all([
+        api.listJobProfiles(),
         api.listQASets(),
       ]);
       if (!active) return;
-      setDocuments(docs);
-      setCandidates(cands);
+      setJobProfiles(profiles);
       setQaSets(sets);
       setLoading(false);
     })();
@@ -47,49 +67,45 @@ export function AppProvider({ children }) {
     };
   }, []);
 
-  // Poll while any document is still being ingested (mock pipeline advances over time).
-  useEffect(() => {
-    const stillProcessing = documents.some(
-      (d) => d.status !== "indexed" && d.status !== "failed"
-    );
-    if (!stillProcessing) return;
-    const t = setInterval(() => {
-      refreshDocuments();
-    }, 1000);
-    return () => clearInterval(t);
-  }, [documents, refreshDocuments]);
+  const createJobProfile = useCallback(
+    async (data) => {
+      const profile = await api.createJobProfile(data);
+      await refreshJobProfiles();
+      return profile;
+    },
+    [refreshJobProfiles]
+  );
+
+  // Quick profile creation (returns profile without forcing page refresh)
+  const createJobProfileQuick = useCallback(
+    async (data) => {
+      const profile = await api.createJobProfile(data);
+      setJobProfiles((prev) => [profile, ...prev]);
+      return profile;
+    },
+    []
+  );
+
+  const deleteJobProfile = useCallback(
+    async (id) => {
+      await api.deleteJobProfile(id);
+      await refreshJobProfiles();
+    },
+    [refreshJobProfiles]
+  );
 
   const uploadDocument = useCallback(
-    async (file) => {
-      await api.uploadDocument(file);
-      return refreshDocuments();
+    async (profileId, file) => {
+      return api.uploadDocument(profileId, file);
     },
-    [refreshDocuments]
+    []
   );
 
   const deleteDocument = useCallback(
-    async (id) => {
-      await api.deleteDocument(id);
-      return refreshDocuments();
+    async (profileId, docId) => {
+      return api.deleteDocument(profileId, docId);
     },
-    [refreshDocuments]
-  );
-
-  const createCandidate = useCallback(
-    async (data) => {
-      const cand = await api.createCandidate(data);
-      await refreshCandidates();
-      return cand;
-    },
-    [refreshCandidates]
-  );
-
-  const deleteCandidate = useCallback(
-    async (id) => {
-      await api.deleteCandidate(id);
-      return refreshCandidates();
-    },
-    [refreshCandidates]
+    []
   );
 
   const generateQA = useCallback(
@@ -111,7 +127,6 @@ export function AppProvider({ children }) {
 
   const rateQuestion = useCallback(
     async (setId, questionId, rating) => {
-      // Optimistic update so the UI feels instant.
       setQaSets((sets) =>
         sets.map((s) =>
           s.id !== setId
@@ -130,20 +145,21 @@ export function AppProvider({ children }) {
   );
 
   const value = {
-    documents,
-    candidates,
+    jobProfiles,
     qaSets,
     loading,
-    refreshDocuments,
-    refreshCandidates,
+    refreshJobProfiles,
     refreshQaSets,
+    createJobProfile,
+    createJobProfileQuick,
+    deleteJobProfile,
     uploadDocument,
     deleteDocument,
-    createCandidate,
-    deleteCandidate,
     generateQA,
     deleteQASet,
     rateQuestion,
+    generateState,
+    setGenerateState,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

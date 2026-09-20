@@ -6,9 +6,12 @@ frontend (src/api/mockData.js) expects, while staying snake_case in Python.
 
 from __future__ import annotations
 
+import warnings
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
+
+warnings.filterwarnings("ignore", message=".*alias.*attribute.*has no effect.*")
 
 
 class CamelModel(BaseModel):
@@ -27,6 +30,7 @@ class Document(CamelModel):
     chunks_done: int = 0    # chunks embedded so far (for progress)
     uploaded_at: str
     excerpt: str = ""
+    job_profile_id: Optional[str] = None
 
 
 class Source(CamelModel):
@@ -41,18 +45,20 @@ class Question(CamelModel):
     question: str
     answer: str
     type: str  # knowledge | skill
+    sub_type: str = "fundamentals"  # fundamentals | understanding (knowledge) | apply | analyse (skill)
     confidence: float
     answerable: bool
     sources: List[Source] = []
     rating: Optional[int] = None  # 1 = up, -1 = down, None = unrated
+    options: List[str] = []  # MCQ options (A-D)
+    correct_option: int = 0  # index of correct option (0-3)
+    explanation: str = ""  # why the correct answer is correct
+    expected_time_seconds: int = 60  # estimated time for candidate
 
 
 class QASet(CamelModel):
     id: str
     job_role: str
-    candidate_id: Optional[str] = None
-    candidate_name: Optional[str] = None
-    candidate_role: Optional[str] = None
     prompt: str
     top_k: int
     created_at: str
@@ -62,9 +68,6 @@ class QASet(CamelModel):
 
 class GenerateRequest(CamelModel):
     job_role: str
-    candidate_id: Optional[str] = None
-    candidate_name: Optional[str] = None
-    candidate_role: Optional[str] = None
     prompt: str = ""
     top_k: int = 6
     document_ids: List[str] = []
@@ -117,30 +120,14 @@ class User(CamelModel):
     email: Optional[str] = None
 
 
-class Candidate(CamelModel):
+class JobProfile(CamelModel):
     id: str
     name: str
-    email: str
-    target_role: str
-    resume_name: str
-    resume_ext: str
-    resume_size_bytes: int
-    uploaded_at: str
-    skills: List[str] = []
-    experience_years: int = 0
-    summary: str = ""
+    created_at: str
 
 
-class CandidateCreateRequest(CamelModel):
+class JobProfileCreateRequest(CamelModel):
     name: str
-    email: Optional[str] = None
-    target_role: str
-    resume_name: Optional[str] = None
-    resume_ext: Optional[str] = None
-    resume_size_bytes: Optional[int] = None
-    skills: List[str] = []
-    experience_years: Optional[int] = None
-    summary: Optional[str] = None
 
 
 class AuthResponse(CamelModel):
