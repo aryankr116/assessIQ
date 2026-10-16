@@ -11,13 +11,14 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Resolve the project root (parent of this package) so relative paths and the
+# same .env work no matter which directory the server is launched from.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
 # Load a .env file if python-dotenv is available (optional dependency).
-# Resolve the project root (parent of this package) so the same .env works no
-# matter which directory the server is launched from.
 try:  # pragma: no cover - convenience only
     from dotenv import load_dotenv
 
-    _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     load_dotenv(_PROJECT_ROOT / ".env")
     load_dotenv(_PROJECT_ROOT / "backend" / ".env")
 except Exception:
@@ -31,11 +32,19 @@ def _bool(name: str, default: bool) -> bool:
     return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _abs_data_dir(raw: str) -> Path:
+    """Resolve the data dir, anchoring relative paths to the project root."""
+    path = Path(raw)
+    return path if path.is_absolute() else (_PROJECT_ROOT / path)
+
+
 @dataclass
 class Settings:
     # --- Storage ---------------------------------------------------------
+    # Relative paths are anchored to the project root (not the current working
+    # directory) so the store never silently splits across launch locations.
     data_dir: Path = field(
-        default_factory=lambda: Path(
+        default_factory=lambda: _abs_data_dir(
             os.getenv("ASSESSIQ_DATA_DIR", "backend/.assessiq_data")
         )
     )
@@ -50,6 +59,11 @@ class Settings:
     # --- Chunking (used when (re)ingesting through the API) --------------
     chunk_size: int = int(os.getenv("ASSESSIQ_CHUNK_SIZE", "1000"))
     chunk_overlap: int = int(os.getenv("ASSESSIQ_CHUNK_OVERLAP", "200"))
+
+    # Minimum usable text (characters) a document must extract to be indexed.
+    # Documents thinner than this are rejected so generation always has enough
+    # material to ground a full question set in.
+    min_document_chars: int = int(os.getenv("ASSESSIQ_MIN_DOCUMENT_CHARS", "15000"))
 
     # --- Vector Database -------------------------------------------------
     # one of: "chroma", "faiss"
@@ -80,7 +94,7 @@ class Settings:
     )
 
     # --- Generation provider --------------------------------------------
-    # one of: "openai", "ollama", "offline"
+    # one of: "openai", "gemini", "ollama", "offline"
     llm_provider: str = os.getenv("ASSESSIQ_LLM_PROVIDER", "openai").lower()
     # How many Q&A pairs to aim for per generation request.
     questions_per_set: int = int(os.getenv("ASSESSIQ_QUESTIONS_PER_SET", "6"))
@@ -89,6 +103,18 @@ class Settings:
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "")  # empty = default
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    # For reasoning models (e.g. Groq's gpt-oss-*): "low"/"medium"/"high".
+    # Empty = don't send the parameter (for models that don't support it).
+    openai_reasoning_effort: str = os.getenv("OPENAI_REASONING_EFFORT", "")
+
+    # Gemini (Google AI Studio) — used through its OpenAI-compatible endpoint.
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    # Tried automatically if the primary model is overloaded/quota-limited.
+    gemini_fallback_model: str = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
+    gemini_base_url: str = os.getenv(
+        "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
+    )
 
     # Ollama
     ollama_host: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -124,6 +150,8 @@ class Settings:
         """Fall back to the offline provider if the chosen one isn't usable,
         so the server always starts and demos cleanly."""
         if self.llm_provider == "openai" and not self.openai_api_key:
+            return "offline"
+        if self.llm_provider == "gemini" and not self.gemini_api_key:
             return "offline"
         return self.llm_provider
 

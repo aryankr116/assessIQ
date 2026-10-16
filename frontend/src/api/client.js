@@ -155,7 +155,7 @@ function createMockClient() {
       await delay(180);
       return qaSets.map((s) => ({ ...s, questions: s.questions.map((q) => ({ ...q })) }));
     },
-    async generateQA({ jobRole, prompt, topK, documentIds, twoRound, jobProfileId }) {
+    async generateQA({ jobRole, prompt, topK, numQuestions, documentIds, twoRound, questionType, jobProfileId }) {
       await delay(1100);
       const profileDocs = jobProfileId
         ? documents.filter((d) => d.jobProfileId === jobProfileId)
@@ -164,8 +164,10 @@ function createMockClient() {
         jobRole,
         prompt,
         topK,
+        numQuestions,
         documentIds,
         twoRound,
+        questionType,
         documents: profileDocs,
       });
       qaSets = [set, ...qaSets];
@@ -228,8 +230,10 @@ function synthesizeQASet({
   jobRole,
   prompt,
   topK,
+  numQuestions,
   documentIds = [],
   twoRound,
+  questionType,
   documents = [],
 }) {
   const finalRole = jobRole || "General Role";
@@ -453,17 +457,23 @@ function synthesizeQASet({
   };
 
   let questions = [];
-  const limit = Math.max(2, Math.min(topK || 6, (pool.length || 1) * 2));
-  if (twoRound) {
-    pool.forEach((d) => questions.push(mk(d, "knowledge", questions.length + 1)));
-    pool.forEach((d) => questions.push(mk(d, "skill", questions.length + 1)));
+  // Determine how many questions and which types to emit.
+  const target = Math.max(1, numQuestions || topK || 6);
+  const mode = questionType || (twoRound ? "both" : "mixed");
+  const typePlan = [];
+  if (mode === "knowledge") {
+    for (let i = 0; i < target; i++) typePlan.push("knowledge");
+  } else if (mode === "skill") {
+    for (let i = 0; i < target; i++) typePlan.push("skill");
+  } else if (mode === "both") {
+    const nK = Math.ceil(target / 2);
+    for (let i = 0; i < target; i++) typePlan.push(i < nK ? "knowledge" : "skill");
   } else {
-    pool.forEach((d) => {
-      questions.push(mk(d, "knowledge", questions.length + 1));
-      questions.push(mk(d, "skill", questions.length + 1));
-    });
+    for (let i = 0; i < target; i++) typePlan.push(i % 2 === 0 ? "knowledge" : "skill");
   }
-  questions = questions.slice(0, limit).map((q, i) => ({ ...q, id: `q${i + 1}` }));
+  if (pool.length) {
+    questions = typePlan.map((type, i) => mk(pool[i % pool.length], type, i + 1));
+  }
 
   if (!questions.length) {
     questions = [

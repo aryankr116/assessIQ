@@ -32,18 +32,24 @@ SKILL_PROTOTYPES = [
     "Design a system to handle this requirement.",
     "How would you build and optimise this component?",
     "Apply this technique to the following practical case.",
+    "In this production outage or scenario, what is the immediate next step?",
+    "What is the best remediation action to take given this system failure?",
+    "Analyze the architectural trade-offs between these two approaches.",
 ]
 
 _SKILL_CUES = re.compile(
     r"\b(implement|write|code|build|design|debug|fix|optimi[sz]e|refactor|"
-    r"configure|deploy|create a|develop|construct|apply|handle|troubleshoot)\b",
+    r"configure|deploy|create a|develop|construct|apply|handle|troubleshoot|"
+    r"scenario|outage|incident|on-call|next step|remediation|mitigate|trade-off|"
+    r"triage|action|remediate)\b",
     re.IGNORECASE,
 )
 _KNOWLEDGE_CUES = re.compile(
-    r"\b(what is|what are|define|definition|explain|describe|list|when|why|"
-    r"which|difference between|concept|meaning|purpose)\b",
+    r"\b(what is the definition|define|definition|explain the concept|describe the theory|"
+    r"difference between|concept of|meaning of|primary purpose of|theoretical)\b",
     re.IGNORECASE,
 )
+_GENERIC_INTERROGATIVES = re.compile(r"\b(what is|what are|which of the following|why is)\b", re.IGNORECASE)
 
 _PROTO_EMB = None
 
@@ -71,13 +77,16 @@ def classify_question(question: str) -> Classification:
     k_sim = float(np.mean(k_emb @ q))
     s_sim = float(np.mean(s_emb @ q))
 
-    # Lexical nudges. Weighted strongly so the classifier still works when the
-    # semantic signal is weak (e.g. the hashing fallback embedder); with real
-    # sentence-transformer embeddings the k_sim/s_sim terms carry most of it.
-    k_cues = len(_KNOWLEDGE_CUES.findall(question))
+    # Lexical nudges.
     s_cues = len(_SKILL_CUES.findall(question))
-    k_bonus = 0.13 * k_cues
-    s_bonus = 0.13 * s_cues
+    k_cues = len(_KNOWLEDGE_CUES.findall(question))
+    
+    # Only treat generic interrogatives ("what is", "which") as knowledge if NOT a scenario
+    if s_cues == 0:
+        k_cues += len(_GENERIC_INTERROGATIVES.findall(question))
+
+    k_bonus = 0.12 * k_cues
+    s_bonus = 0.12 * s_cues
     k_score = k_sim + k_bonus
     s_score = s_sim + s_bonus
 

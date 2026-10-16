@@ -252,7 +252,9 @@ export default function DocsLibrary() {
                 <div className="mt-3 rounded-xl bg-red-50 p-3 space-y-1.5 text-xs ring-1 ring-inset ring-red-100">
                   <div className="flex items-center gap-1.5 font-semibold text-red-600">
                     <AlertCircle size={14} />
-                    Ingestion failed
+                    {doc.excerpt?.startsWith("Insufficient content")
+                      ? "Document too small"
+                      : "Ingestion failed"}
                   </div>
                   <p className="text-[11px] leading-relaxed text-red-500">
                     {doc.excerpt || "Could not parse document."}

@@ -36,9 +36,57 @@ class AppStore:
         self.qa_sets: Dict[str, dict] = self._load(self._sets_path)
         self.job_profiles: Dict[str, dict] = self._load(self._profiles_path)
 
+        # Keep the vector index in sync with the document list: the persisted
+        # FAISS index can drift (e.g. lost/replaced files, or docs uploaded
+        # under a different data dir). Any indexed document without vectors is
+        # re-ingested from its saved upload so retrieval never silently returns
+        # "out of scope" for documents the UI still lists.
+        self._reconcile_index()
+
         # Admin-tunable system parameters (persisted).
         self._params_path = self.data_dir / "params.json"
         self.params = self._load_params()
+
+    def _reconcile_index(self):
+        store = self.pipeline.store
+        indexed = {
+            d["id"]: d
+            for d in self.documents.values()
+            if d.get("status") == "indexed"
+        }
+
+        # Drop orphaned chunks whose document is no longer indexed/known.
+        for doc_id in {r.doc_id for r in store.records}:
+            if doc_id not in indexed:
+                self.pipeline.remove_document(doc_id)
+
+        # Re-ingest indexed documents that have no vectors in the store.
+        uploads = self.data_dir / "uploads"
+        for doc_id, doc in list(indexed.items()):
+            if store.doc_chunk_count(doc_id) > 0:
+                continue
+            matches = list(uploads.glob(f"{doc_id}.*")) if uploads.exists() else []
+            if not matches:
+                continue
+            try:
+                result = self.pipeline.ingest_document(
+                    str(matches[0]), doc_id, doc.get("name", "upload")
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[store] re-index failed for {doc_id}: {exc}")
+                continue
+            doc.update(
+                {
+                    "chunks": result.chunk_count,
+                    "chunksTotal": result.chunk_count,
+                    "chunksDone": result.chunk_count,
+                    "pages": max(1, result.chunk_count // 3) if result.chunk_count else 0,
+                    "excerpt": result.excerpt or doc.get("excerpt", ""),
+                }
+            )
+            self.documents[doc_id] = doc
+
+        self.persist()
 
     def _load_params(self) -> dict:
         defaults = {

@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Sparkles,
@@ -113,17 +113,45 @@ export default function Generate() {
   const profilePrompts = generateState?.profilePrompts || {};
   const [prompt, setPrompt] = useState(profilePrompts[selectedProfileId] || generateState?.prompt || "");
 
-  // 3. Selected docs (defaults to all indexed)
+  // 3. Selected docs (defaults to all indexed for the active profile)
   const [selectedDocs, setSelectedDocs] = useState(generateState?.selectedDocs || []);
 
-  // Pre-select all indexed docs whenever they change (only if not restoring from persistence)
+  // Tracks which profile the current selection belongs to, and whether the user
+  // has explicitly changed it. Prevents a selection made under one profile from
+  // leaking into generation for a different profile.
+  const selScopeRef = useRef({
+    profile: generateState?.selectedProfileId || "",
+    touched: false,
+  });
+
   useEffect(() => {
-    if (generateState?.selectedProfileId === selectedProfileId && generateState?.selectedDocs?.length > 0) {
-      // Restoring from persistence — keep saved selection
+    const scope = selScopeRef.current;
+    const all = indexedDocs.map((d) => d.id);
+
+    if (scope.profile !== selectedProfileId) {
+      // Profile changed: the old selection points at another profile's documents.
+      scope.profile = selectedProfileId;
+      scope.touched = false;
+      setSelectedDocs(all);
       return;
     }
-    setSelectedDocs(indexedDocs.map((d) => d.id));
-  }, [indexedDocs]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (scope.touched) {
+      // User has chosen for this profile: keep it, drop only vanished doc ids.
+      setSelectedDocs((cur) => {
+        const valid = cur.filter((id) => indexedDocs.some((d) => d.id === id));
+        return valid.length === cur.length ? cur : valid;
+      });
+      return;
+    }
+
+    // Not touched yet: restore valid ids, otherwise default to this profile's docs.
+    setSelectedDocs((cur) => {
+      const valid = cur.filter((id) => indexedDocs.some((d) => d.id === id));
+      if (valid.length === 0) return all;
+      return valid.length === cur.length ? cur : valid;
+    });
+  }, [selectedProfileId, indexedDocs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 4. Question type (persisted)
   const [questionType, setQuestionType] = useState(generateState?.questionType || "both");
@@ -165,12 +193,14 @@ export default function Generate() {
   }, [selectedProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleDoc(id) {
+    selScopeRef.current.touched = true;
     setSelectedDocs((cur) =>
       cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
     );
   }
 
   function selectAllDocs() {
+    selScopeRef.current.touched = true;
     const allSelected = indexedDocs.every((d) => selectedDocs.includes(d.id));
     if (allSelected) {
       setSelectedDocs([]);
@@ -206,7 +236,9 @@ export default function Generate() {
       setError("Please select or enter a target job role.");
       return;
     }
-    if (selectedDocs.length === 0) {
+    // Never send documents that don't belong to the active profile.
+    const docIds = selectedDocs.filter((id) => indexedDocs.some((d) => d.id === id));
+    if (docIds.length === 0) {
       setError("Please select at least one indexed document for grounding.");
       return;
     }
@@ -222,7 +254,8 @@ export default function Generate() {
         jobRole: selectedRole.trim(),
         prompt: finalPrompt,
         topK: questionCount,
-        documentIds: selectedDocs,
+        numQuestions: questionCount,
+        documentIds: docIds,
         twoRound: questionType === "both",
         questionType,
         jobProfileId: selectedProfileId || undefined,

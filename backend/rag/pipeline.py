@@ -34,6 +34,7 @@ from .vector_store import VectorStore, ChunkRecord
 class IngestResult:
     chunk_count: int
     excerpt: str
+    char_count: int = 0
 
 
 @dataclass
@@ -96,10 +97,25 @@ class RagPipeline:
                     raw = " ".join(words[:500])
             except Exception:
                 pass
-        if not raw or not raw.strip():
-            raw = f"Document specifications for {doc_name}. Covers core architecture, operational protocols, security guidelines, and microservices SLAs."
+        raw = raw or ""
 
         cleaned = clean_text(raw)
+
+        # Minimum usable-content gate: a document that extracts (almost) no text
+        # would otherwise ground a set of irrelevant/template questions. Reject it
+        # with a clear message instead of indexing it.
+        char_count = len(cleaned)
+        if char_count < settings.min_document_chars:
+            return IngestResult(
+                chunk_count=0,
+                excerpt=(
+                    f"Insufficient content: only {char_count} characters of usable text "
+                    f"were extracted (minimum {settings.min_document_chars} required). "
+                    "Upload a more substantial document."
+                ),
+                char_count=char_count,
+            )
+
         chunks = chunk_text(
             cleaned,
             chunk_size=settings.chunk_size,
@@ -131,7 +147,7 @@ class RagPipeline:
         excerpt = cleaned[:280].strip()
         if len(cleaned) > 280:
             excerpt += " …"
-        return IngestResult(chunk_count=total, excerpt=excerpt)
+        return IngestResult(chunk_count=total, excerpt=excerpt, char_count=char_count)
 
     def remove_document(self, doc_id: str):
         self.store.remove_doc(doc_id)
@@ -146,6 +162,21 @@ class RagPipeline:
         "knowledge": "concepts, definitions, theory and explanations",
         "skill": "implementation, coding, debugging, design and practical tasks",
     }
+
+    # Sub-types allowed per cognitive type (report 4.5 taxonomy).
+    _KNOWLEDGE_SUBTYPES = ("fundamentals", "understanding")
+    _SKILL_SUBTYPES = ("apply", "analyse")
+
+    def _coerce_subtype(self, q_type: str, raw_sub_type: str, idx: int) -> str:
+        """Guarantee the sub-type belongs to the question's type:
+        knowledge -> fundamentals|understanding, skill -> apply|analyse."""
+        allowed = (
+            self._KNOWLEDGE_SUBTYPES if q_type == "knowledge" else self._SKILL_SUBTYPES
+        )
+        if raw_sub_type in allowed:
+            return raw_sub_type
+        # Fall back to an evenly alternating valid sub-type.
+        return allowed[(idx - 1) % len(allowed)]
 
     def _make_question(self, idx, qa, contexts, ctx_vecs, force_type=None) -> Question:
         cls = classify_question(qa.question)
@@ -168,7 +199,8 @@ class RagPipeline:
 
         answerable = bool(qa.answerable) and grounding >= settings.answerability_threshold
         confidence = round(float(max(0.0, min(0.99, grounding))), 2)
-        sub_type = getattr(qa, "sub_type", "fundamentals")
+        raw_sub_type = getattr(qa, "sub_type", "") or ""
+        sub_type = self._coerce_subtype(q_type, raw_sub_type, idx)
         _TIME_RANGES = {
             "fundamentals": (20, 40), "understanding": (45, 75),
             "apply": (60, 100), "analyse": (75, 120),
@@ -193,9 +225,10 @@ class RagPipeline:
         """One retrieval+generation round. Returns (questions, best_score)."""
         hint = self._CATEGORY_QUERY_HINT.get(category or "", "")
         query = f"{job_role}. {prompt}. {hint}".strip()
-        contexts = self.retriever.retrieve(query, k=top_k, doc_ids=document_ids or None)
+        k = max(top_k or 0, n)
+        contexts = self.retriever.retrieve(query, k=k, doc_ids=document_ids or None)
         best_score = max((c.score for c in contexts), default=0.0)
-        if not contexts:
+        if not contexts or best_score < settings.answerability_threshold:
             return [], best_score
 
         generator = get_generator()
@@ -244,13 +277,35 @@ class RagPipeline:
         top_k: int,
         document_ids: Optional[List[str]] = None,
         two_round: bool = False,
+        num_questions: Optional[int] = None,
+        question_type: Optional[str] = None,
     ) -> QAResult:
         used_docs = document_ids or [r.doc_id for r in self.store.records]
         used_docs = list(dict.fromkeys(used_docs))
 
-        if two_round:
-            # Round 1: Knowledge. Round 2: Skill. Each with its own retrieval.
-            total = settings.questions_per_set
+        total = int(num_questions) if num_questions else settings.questions_per_set
+        total = max(1, min(total, 50))
+
+        q_type = (question_type or "").lower()
+        if q_type not in ("knowledge", "skill", "both"):
+            q_type = "both" if two_round else "mixed"
+
+        def _finish(questions, best):
+            if not questions:
+                return self._out_of_scope(job_role, prompt, top_k, document_ids, best)
+            for i, q in enumerate(questions, start=1):
+                q.id = f"q{i}"
+            return QAResult(job_role, prompt, top_k, used_docs, questions)
+
+        # Single-category rounds (user explicitly asked for one type).
+        if q_type in ("knowledge", "skill"):
+            qs, best = self._generate_round(
+                job_role, prompt, top_k, document_ids, total, q_type, 1
+            )
+            return _finish(qs, best)
+
+        # Two-round: Knowledge then Skill, each with its own retrieval.
+        if q_type == "both":
             n_know = (total + 1) // 2
             n_skill = total - n_know
             k_qs, k_best = self._generate_round(
@@ -259,23 +314,13 @@ class RagPipeline:
             s_qs, s_best = self._generate_round(
                 job_role, prompt, top_k, document_ids, n_skill, "skill", len(k_qs) + 1
             )
-            questions = k_qs + s_qs
-            if not questions:
-                return self._out_of_scope(
-                    job_role, prompt, top_k, document_ids, max(k_best, s_best)
-                )
-            # Re-id sequentially after combining.
-            for i, q in enumerate(questions, start=1):
-                q.id = f"q{i}"
-            return QAResult(job_role, prompt, top_k, used_docs, questions)
+            return _finish(k_qs + s_qs, max(k_best, s_best))
 
-        # Single mixed round.
+        # Mixed single round (no explicit type requested).
         questions, best = self._generate_round(
-            job_role, prompt, top_k, document_ids, settings.questions_per_set, None, 1
+            job_role, prompt, top_k, document_ids, total, None, 1
         )
-        if not questions:
-            return self._out_of_scope(job_role, prompt, top_k, document_ids, best)
-        return QAResult(job_role, prompt, top_k, used_docs, questions)
+        return _finish(questions, best)
 
 
 def new_question_id() -> str:

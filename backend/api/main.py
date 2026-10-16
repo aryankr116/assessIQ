@@ -381,13 +381,18 @@ def list_qa_sets():
 def generate_qa(req: GenerateRequest, _: dict = Depends(auth.require_user)):
     store = get_store()
     prompt = req.prompt or f"Generate interview questions for a {req.job_role}."
-    result = store.pipeline.generate_qa(
-        job_role=req.job_role,
-        prompt=prompt,
-        top_k=req.top_k or settings.default_top_k,
-        document_ids=req.document_ids or None,
-        two_round=req.two_round,
-    )
+    try:
+        result = store.pipeline.generate_qa(
+            job_role=req.job_role,
+            prompt=prompt,
+            top_k=req.top_k or settings.default_top_k,
+            document_ids=req.document_ids or None,
+            two_round=req.two_round,
+            num_questions=req.num_questions,
+            question_type=req.question_type,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     qa_set = QASet(
         id="set_" + uuid.uuid4().hex[:10],

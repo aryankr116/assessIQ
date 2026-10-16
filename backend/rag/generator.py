@@ -58,7 +58,12 @@ SYSTEM_PROMPT = (
     "     - apply: Practical scenario (e.g. 'Given a production outage caused by X, what is your first step?'). Expected time: 60-100 seconds.\n"
     "     - analyse: Reasoning and trade-offs (e.g. 'Compare approach A vs B for this scenario. What are the trade-offs?'). Expected time: 75-120 seconds.\n"
     "8. Distractors (wrong options) must be plausible but clearly incorrect to someone with domain knowledge.\n"
-    "9. The correct answer explanation should be 2-3 sentences explaining the technical reasoning."
+    "9. The correct answer explanation should be 2-3 sentences explaining the technical reasoning.\n"
+    "10. NEVER generate a question ABOUT the source material itself — never quiz on how the book/document "
+    "is written or presented (its prose, pseudocode style, structure, table of contents, chapter layout, "
+    "publisher, author, edition, ISBN, or how it explains things). Ignore passages that describe the "
+    "material's own presentation. Ask only about the SUBJECT MATTER being taught (concepts, technologies, "
+    "skills, trade-offs, scenarios).\n"
 )
 
 
@@ -85,9 +90,13 @@ def _build_user_prompt(
     n: int,
     category: str | None = None,
 ) -> str:
-    ctx_blocks = []
-    for c in contexts:
-        ctx_blocks.append(f"[doc: {c.doc_name} | chunk: {c.chunk_id}]\n{c.text}")
+    # Send the FULL text of every retrieved chunk so the model has maximal
+    # grounding material. Token budget is not a constraint for this deployment,
+    # and truncating/collapsing the context measurably degrades question quality.
+    ctx_blocks = [
+        f"[doc: {c.doc_name} | chunk: {c.chunk_id}]\n{c.text.strip()}"
+        for c in contexts
+    ]
     ctx = "\n\n---\n\n".join(ctx_blocks) if ctx_blocks else "(no context retrieved)"
     cat_line = _CATEGORY_INSTRUCTION.get(category or "", "")
     sub_type_hint = ""
@@ -119,6 +128,9 @@ def _build_user_prompt(
         f"IMPORTANT RULES:\n"
         f"- Each question MUST be a multiple-choice question with exactly 4 options.\n"
         f"- Do NOT ask 'According to the document...' or 'What value/threshold/rate is specified...'.\n"
+        f"- NEVER ask a question about the source material itself (the book/document: its writing or "
+        f"pseudocode style, table of contents, structure, publisher, author, how it presents things). "
+        f"Ignore such passages entirely.\n"
         f"- Do NOT quiz on specific numbers, percentages, or configuration values from the context.\n"
         f"- DO ask about concepts, patterns, trade-offs, scenarios, and engineering reasoning.\n"
         f"{sub_type_hint}"
@@ -143,16 +155,58 @@ def _build_user_prompt(
     )
 
 
+def _salvage_objects(text: str) -> List[dict]:
+    """Extract every complete top-level {...} object from possibly-truncated JSON."""
+    objs: List[dict] = []
+    depth = 0
+    start = None
+    in_str = False
+    esc = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    try:
+                        objs.append(json.loads(text[start : i + 1]))
+                    except Exception:
+                        pass
+                    start = None
+    return objs
+
+
 def _parse_json_array(text: str, n: int) -> List[GeneratedQA]:
-    """Best-effort extraction of a JSON array from an LLM response."""
+    """Best-effort extraction of a JSON array from an LLM response.
+
+    Tolerates markdown fences and truncated output (e.g. when the model hits the
+    token limit mid-array): complete objects are salvaged instead of discarding
+    the whole response.
+    """
     text = text.strip()
     match = re.search(r"\[.*\]", text, re.DOTALL)
     if match:
         text = match.group(0)
+    data = None
     try:
         data = json.loads(text)
     except Exception:
-        return []
+        data = None
+    if not isinstance(data, list):
+        data = _salvage_objects(text)
     out: List[GeneratedQA] = []
     for item in data[:n]:
         if not isinstance(item, dict):
@@ -191,27 +245,163 @@ def _parse_json_array(text: str, n: int) -> List[GeneratedQA]:
 class OpenAIProvider:
     name = "openai"
 
+    # Generate the whole set in a single call for coherence (the model sees the
+    # full context once and keeps the set internally consistent).
+    _BATCH_SIZE = 50
+
     def __init__(self):
         from openai import OpenAI  # imported lazily
 
         kwargs = {"api_key": settings.openai_api_key}
         if settings.openai_base_url:
             kwargs["base_url"] = settings.openai_base_url
-        self.client = OpenAI(**kwargs)
+        # Fail fast on a stalled call (we handle retries/backoff ourselves).
+        self.client = OpenAI(timeout=60.0, max_retries=0, **kwargs)
         self.model = settings.openai_model
+        self.models = [self.model]
+
+    def _generate_batch(self, job_role, focus, contexts, n, category, model=None) -> List[GeneratedQA]:
+        import time
+        import logging
+
+        logger = logging.getLogger("rag.generator")
+        model = model or self.model
+        max_retries = 4
+        backoff = 3.0
+        # Enough headroom that a full set is never truncated, but bounded so a
+        # single request doesn't blow past the provider's tokens-per-minute
+        # limit (Groq free tier: 8000 TPM).
+        max_tokens = min(6000, max(3000, 450 * n))
+
+        for attempt in range(max_retries):
+            try:
+                req = dict(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": _build_user_prompt(job_role, focus, contexts, n, category)},
+                    ],
+                    temperature=0.3,
+                    max_tokens=max_tokens,
+                )
+                if settings.openai_reasoning_effort:
+                    # Reasoning models spend output tokens "thinking"; a low
+                    # effort frees the budget for the JSON (and saves quota).
+                    req["extra_body"] = {"reasoning_effort": settings.openai_reasoning_effort}
+                resp = self.client.chat.completions.create(**req)
+                content = resp.choices[0].message.content or ""
+                parsed = _parse_json_array(content, n)
+                if parsed:
+                    return parsed
+                finish = getattr(resp.choices[0], "finish_reason", "?")
+                logger.warning(
+                    f"Generator returned no parseable questions (finish_reason={finish})."
+                )
+                # A truncated/empty response is often transient (verbose thinking
+                # or a glitch) — retry rather than give up on the whole batch.
+                if attempt < max_retries - 1:
+                    time.sleep(backoff)
+                    backoff *= 2.0
+                    continue
+                break
+            except Exception as e:
+                err_msg = str(e).lower()
+                # 429 = quota/rate limit; 503 = model temporarily overloaded.
+                # Both are transient and worth retrying with backoff.
+                retryable = (
+                    "429" in err_msg
+                    or "rate_limit" in err_msg
+                    or "too large" in err_msg
+                    or "503" in err_msg
+                    or "unavailable" in err_msg
+                    or "overloaded" in err_msg
+                    or "high demand" in err_msg
+                )
+                if retryable and attempt < max_retries - 1:
+                    # Honor the provider's own "try again in Xs" when present.
+                    m = re.search(r"try again in ([\d.]+)\s*s", err_msg)
+                    wait = float(m.group(1)) + 1.0 if m else backoff
+                    wait = min(wait, 30.0)
+                    logger.warning(
+                        f"Transient error on model {model} (attempt {attempt + 1}/{max_retries}). "
+                        f"Backing off for {wait:.1f}s..."
+                    )
+                    time.sleep(wait)
+                    backoff *= 2.0
+                    continue
+                logger.error(f"OpenAI generation failed: {type(e).__name__}: {e}.")
+                break
+
+        return []
+
+    def _generate_with_model(self, model, job_role, focus, contexts, n, category) -> List[GeneratedQA]:
+        results: List[GeneratedQA] = []
+        remaining = n
+        while remaining > 0:
+            batch_n = min(self._BATCH_SIZE, remaining)
+            batch = self._generate_batch(job_role, focus, contexts, batch_n, category, model)
+            if not batch:
+                break
+            results.extend(batch)
+            if len(batch) < batch_n:
+                break
+            remaining -= len(batch)
+        return results
 
     def generate(self, job_role, focus, contexts, n, category=None) -> List[GeneratedQA]:
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": _build_user_prompt(job_role, focus, contexts, n, category)},
-            ],
-            temperature=0.3,
+        import logging
+
+        logger = logging.getLogger("rag.generator")
+        best: List[GeneratedQA] = []
+        # Try each configured model (primary first, then fallbacks). Accept the
+        # primary as soon as it delivers the full set; otherwise keep the best
+        # partial result and try the next model.
+        for model in self.models:
+            results = self._generate_with_model(model, job_role, focus, contexts, n, category)
+            if len(results) >= n:
+                return results[:n]
+            if len(results) > len(best):
+                best = results
+            if results:
+                logger.warning(
+                    f"Model {model} produced only {len(results)}/{n} questions; trying next."
+                )
+
+        if best:
+            return best[:n]
+
+        # Don't silently substitute low-quality template questions — surface
+        # the failure so the caller can report it (e.g. retry later).
+        logger.error("All generation attempts failed via '%s'; no questions produced.", self.name)
+        raise RuntimeError(
+            "Question generation failed: the language model was unavailable or "
+            "rate-limited. Please try again in a moment."
         )
-        content = resp.choices[0].message.content or ""
-        parsed = _parse_json_array(content, n)
-        return parsed or OfflineProvider().generate(job_role, focus, contexts, n, category)
+
+
+# ---------------------------------------------------------------------------
+class GeminiProvider(OpenAIProvider):
+    """Google Gemini, reached through its OpenAI-compatible endpoint.
+
+    Reuses the OpenAI provider's batching, retry, JSON-salvage, and fallback
+    behaviour; only the client (base URL + key) and model differ.
+    """
+
+    name = "gemini"
+
+    def __init__(self):
+        from openai import OpenAI  # imported lazily
+
+        self.client = OpenAI(
+            api_key=settings.gemini_api_key,
+            base_url=settings.gemini_base_url,
+            timeout=60.0,
+            max_retries=0,
+        )
+        self.model = settings.gemini_model
+        # Primary, then fallback (e.g. a lighter model) if it can't deliver.
+        chain = [settings.gemini_model, settings.gemini_fallback_model]
+        self.models = list(dict.fromkeys(m for m in chain if m))
 
 
 # ---------------------------------------------------------------------------
@@ -297,10 +487,17 @@ class OfflineProvider:
     def _topic(text: str) -> str:
         snippet = re.sub(r"\s+", " ", text).strip()
         snippet = re.sub(r"^[#\*\-\d\.\s]+", "", snippet)
-        words = snippet.split(" ")
-        clean_words = [w.strip(".,:;()[]\"'") for w in words[:7] if w]
-        topic_str = " ".join(clean_words)
-        return topic_str or "this architecture component"
+        # Chunks overlap, so text often begins mid-word/mid-sentence. Skip to the
+        # next sentence boundary to avoid topic strings like "tation with ...".
+        if snippet and snippet[0].islower():
+            boundary = re.search(r"[.!?]\s+([A-Z])", snippet)
+            if boundary:
+                snippet = snippet[boundary.start(0) + 2 :]
+        m = re.match(r"(.{10,90}?)[.,;:!?](?:\s|$)", snippet)
+        phrase = m.group(1) if m else snippet[:90]
+        words = [w.strip(".,;:!?()[]\"'") for w in phrase.split(" ")]
+        clean_words = [w for w in words[:7] if w]
+        return " ".join(clean_words) or "this architecture component"
 
     @staticmethod
     def _first_sentences(text: str, max_chars: int = 320) -> str:
@@ -370,6 +567,7 @@ class OfflineProvider:
 
 _PROVIDERS = {
     "openai": OpenAIProvider,
+    "gemini": GeminiProvider,
     "ollama": OllamaProvider,
     "offline": OfflineProvider,
 }

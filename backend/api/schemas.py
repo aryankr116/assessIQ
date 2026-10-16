@@ -70,6 +70,7 @@ class GenerateRequest(CamelModel):
     job_role: str
     prompt: str = ""
     top_k: int = 6
+    num_questions: Optional[int] = None  # how many questions to generate
     document_ids: List[str] = []
     two_round: bool = False  # generate Knowledge then Skill in separate rounds
     question_type: Optional[str] = None  # "both", "knowledge", "skill"

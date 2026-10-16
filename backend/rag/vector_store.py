@@ -265,17 +265,33 @@ class FAISSVectorStore:
 
     @classmethod
     def load(cls, data_dir: Path, dim: int) -> "FAISSVectorStore":
+        import logging
+        logger = logging.getLogger("rag.vector_store")
+
         store = cls(dim)
         vpath = data_dir / "vectors.npy"
         cpath = data_dir / "chunks.json"
         if vpath.exists() and cpath.exists():
-            vectors = np.load(vpath).astype(np.float32)
-            with open(cpath, "r", encoding="utf-8") as f:
-                recs = [ChunkRecord(**r) for r in json.load(f)]
-            if vectors.shape[1] == dim and len(vectors) == len(recs):
-                store.vectors = vectors
-                store.records = recs
-                store._rebuild_faiss()
+            try:
+                vectors = np.load(vpath).astype(np.float32)
+                with open(cpath, "r", encoding="utf-8") as f:
+                    recs = [ChunkRecord(**r) for r in json.load(f)]
+                if vectors.shape[1] != dim:
+                    logger.warning(
+                        f"Vector dimension mismatch: persisted vectors have dim {vectors.shape[1]}, "
+                        f"but active embedder requires {dim}. Store initialized empty; please re-ingest documents."
+                    )
+                elif len(vectors) != len(recs):
+                    logger.warning(
+                        f"Vector record count mismatch: {len(vectors)} vectors vs {len(recs)} records. "
+                        f"Store initialized empty; please re-ingest documents."
+                    )
+                else:
+                    store.vectors = vectors
+                    store.records = recs
+                    store._rebuild_faiss()
+            except Exception as e:
+                logger.error(f"Failed to load vector store from {data_dir}: {e}")
         return store
 
 
