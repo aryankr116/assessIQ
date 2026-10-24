@@ -47,7 +47,7 @@ SYSTEM_PROMPT = (
     "1. Every question MUST have exactly 4 options (A, B, C, D). Exactly ONE is correct.\n"
     "2. Do NOT reference document names, page numbers, or specific values from the context passages.\n"
     "3. Do NOT ask questions like 'According to the document, what is X?' or 'What value does the policy specify for Y?'.\n"
-    "4. Instead, use the context passages to identify TOPIC AREAS and TECHNOLOGIES, then generate questions that test conceptual understanding, applied reasoning, and real-world engineering judgment.\n"
+    "4. SCOPE: Every question must be relevant to the target role and any specific user focus, and must be answerable from relevant context passages. If the passages do not cover the requested scope, do not generate questions rather than switching to an unrelated topic or inventing unsupported questions. If no specific topic is provided, use the context passages to identify topic areas.\n"
     "5. Frame questions around engineering concepts, architectural trade-offs, design patterns, troubleshooting reasoning, and scenario-based decision-making.\n"
     "6. Each question must include a clear explanation of why the correct answer is correct.\n"
     "7. Each question has a TYPE and a SUB-TYPE:\n"
@@ -120,19 +120,43 @@ def _build_user_prompt(
             f"- ~25% apply (practical scenarios, 60-100s expected)\n"
             f"- ~25% analyse (reasoning/trade-offs, 75-120s expected)\n\n"
         )
+    clean_focus = (focus or "").strip()
+    is_custom_focus = bool(
+        clean_focus and not clean_focus.lower().startswith("generate interview questions")
+    )
+
+    if is_custom_focus:
+        directive = (
+            f"MANDATORY FOCUS TOPIC: {clean_focus}\n"
+            f"Target role: {job_role}\n\n"
+            f"CRITICAL REQUIREMENT:\n"
+            f"Generate questions on '{clean_focus}' only when that topic is relevant to the role of '{job_role}' and supported by the context passages.\n\n"
+            f"Context passages from uploaded documents:\n{ctx}\n\n"
+            f"Context Grounding Rules:\n"
+            f"1. If the context passages above are RELEVANT to '{clean_focus}', use them to ground and inform your questions.\n"
+            f"2. If the context passages do not support '{clean_focus}' for this role, do not generate questions on unrelated context or on unsupported topics.\n\n"
+            f"Generate up to {n} MCQ interview questions specifically on '{clean_focus}' when supported by the passages. {cat_line}\n\n"
+        )
+    else:
+        directive = (
+            f"Job role: {job_role}\n"
+            f"Focus: {clean_focus or 'general competencies for this role'}\n\n"
+            f"Context passages (use these to identify TECHNOLOGY TOPICS, NOT as a source of specific values):\n{ctx}\n\n"
+            f"Generate {n} MCQ interview questions about the TECHNOLOGIES and CONCEPTS found above. {cat_line}\n\n"
+        )
+
     return (
-        f"Job role: {job_role}\n"
-        f"Focus: {focus or 'general competencies for this role'}\n\n"
-        f"Context passages (use these to identify TECHNOLOGY TOPICS, NOT as a source of specific values):\n{ctx}\n\n"
-        f"Generate {n} MCQ interview questions about the TECHNOLOGIES and CONCEPTS found above. {cat_line}\n\n"
+        f"{directive}"
         f"IMPORTANT RULES:\n"
         f"- Each question MUST be a multiple-choice question with exactly 4 options.\n"
+        f"- Exactly ONE option must be correct (correct_option: 0, 1, 2, or 3).\n"
         f"- Do NOT ask 'According to the document...' or 'What value/threshold/rate is specified...'.\n"
         f"- NEVER ask a question about the source material itself (the book/document: its writing or "
         f"pseudocode style, table of contents, structure, publisher, author, how it presents things). "
         f"Ignore such passages entirely.\n"
         f"- Do NOT quiz on specific numbers, percentages, or configuration values from the context.\n"
         f"- DO ask about concepts, patterns, trade-offs, scenarios, and engineering reasoning.\n"
+        f"- ALWAYS provide 4 complete options, the correct_option index (0-3), and a 2-3 sentence explanation for every single question.\n"
         f"{sub_type_hint}"
         f"Respond with ONLY a JSON array, each item shaped as:\n"
         '{\n'
@@ -150,8 +174,7 @@ def _build_user_prompt(
         f"- sub_type for skill questions: apply or analyse\n"
         f"- expected_time_seconds: fundamentals=20-40, understanding=45-75, apply=60-100, analyse=75-120\n"
         f"- Distractors must be plausible but clearly wrong to someone with domain expertise\n"
-        f"- explanation must be 2-3 sentences explaining why the correct answer is right\n"
-        f"- Set answerable to false (with empty options and explanation) if context is insufficient"
+        f"- explanation must be 2-3 sentences explaining why the correct answer is right"
     )
 
 
@@ -271,7 +294,7 @@ class OpenAIProvider:
         # Enough headroom that a full set is never truncated, but bounded so a
         # single request doesn't blow past the provider's tokens-per-minute
         # limit (Groq free tier: 8000 TPM).
-        max_tokens = min(6000, max(3000, 450 * n))
+        max_tokens = min(8000, max(3500, 500 * n + 1500))
 
         for attempt in range(max_retries):
             try:
@@ -337,16 +360,16 @@ class OpenAIProvider:
     def _generate_with_model(self, model, job_role, focus, contexts, n, category) -> List[GeneratedQA]:
         results: List[GeneratedQA] = []
         remaining = n
-        while remaining > 0:
+        attempts = 0
+        while remaining > 0 and attempts < 3:
+            attempts += 1
             batch_n = min(self._BATCH_SIZE, remaining)
             batch = self._generate_batch(job_role, focus, contexts, batch_n, category, model)
             if not batch:
                 break
             results.extend(batch)
-            if len(batch) < batch_n:
-                break
-            remaining -= len(batch)
-        return results
+            remaining = n - len(results)
+        return results[:n]
 
     def generate(self, job_role, focus, contexts, n, category=None) -> List[GeneratedQA]:
         import logging
@@ -530,9 +553,14 @@ class OfflineProvider:
         else:
             sub_types = self._SUB_TYPES_KNOWLEDGE + self._SUB_TYPES_SKILL
 
+        clean_focus = (focus or "").strip()
+        is_custom_focus = bool(
+            clean_focus and not clean_focus.lower().startswith("generate interview questions")
+        )
+
         out: List[GeneratedQA] = []
         for i, c in enumerate(contexts):
-            topic = self._topic(c.text)
+            topic = clean_focus if is_custom_focus else self._topic(c.text)
             core_summary = self._first_sentences(c.text, max_chars=320)
 
             # Cycle through sub_types evenly based on category

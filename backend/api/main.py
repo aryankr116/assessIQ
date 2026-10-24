@@ -393,6 +393,22 @@ def generate_qa(req: GenerateRequest, _: dict = Depends(auth.require_user)):
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    if not result.questions:
+        focus = (req.prompt or "").strip()
+        if focus and not focus.lower().startswith("generate interview questions"):
+            detail = (
+                f"The selected document(s) don't appear to match your prompt: "
+                f"“{focus}”. Choose document(s) related to this topic or change the prompt."
+            )
+        else:
+            detail = (
+                "The selected document(s) don't appear to match this job role. "
+                "Choose relevant documents or update the job role."
+            )
+        raise HTTPException(
+            status_code=422,
+            detail=detail,
+        )
 
     qa_set = QASet(
         id="set_" + uuid.uuid4().hex[:10],

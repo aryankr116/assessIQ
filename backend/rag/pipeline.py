@@ -184,21 +184,24 @@ class RagPipeline:
 
         source = None
         grounding = 0.0
+        is_grounded = False
         if len(ctx_vecs):
             ans_vec = embed_texts([qa.answer or qa.question])[0]
             sims = ctx_vecs @ ans_vec
             best = int(np.argmax(sims))
             grounding = float(sims[best])
-            c = contexts[best]
-            snippet = c.text.strip().replace("\n", " ")
-            if len(snippet) > 160:
-                snippet = snippet[:160].rstrip() + " …"
-            source = Source(
-                doc_id=c.doc_id, doc_name=c.doc_name, chunk_id=c.chunk_id, snippet=snippet
-            )
+            if grounding >= settings.answerability_threshold:
+                c = contexts[best]
+                snippet = c.text.strip().replace("\n", " ")
+                if len(snippet) > 160:
+                    snippet = snippet[:160].rstrip() + " …"
+                source = Source(
+                    doc_id=c.doc_id, doc_name=c.doc_name, chunk_id=c.chunk_id, snippet=snippet
+                )
+                is_grounded = True
 
-        answerable = bool(qa.answerable) and grounding >= settings.answerability_threshold
-        confidence = round(float(max(0.0, min(0.99, grounding))), 2)
+        answerable = bool(getattr(qa, "answerable", True)) and is_grounded
+        confidence = round(float(max(0.0, min(0.99, grounding))), 2) if is_grounded else 0.0
         raw_sub_type = getattr(qa, "sub_type", "") or ""
         sub_type = self._coerce_subtype(q_type, raw_sub_type, idx)
         _TIME_RANGES = {
@@ -213,7 +216,7 @@ class RagPipeline:
             type=q_type,
             confidence=confidence,
             answerable=answerable,
-            sources=[source] if (source and answerable) else [],
+            sources=[source] if (source and is_grounded) else [],
             sub_type=sub_type,
             options=getattr(qa, "options", []) or ["Option A", "Option B", "Option C", "Option D"],
             correct_option=getattr(qa, "correct_option", 0),
@@ -224,11 +227,22 @@ class RagPipeline:
     def _generate_round(self, job_role, prompt, top_k, document_ids, n, category, start_idx):
         """One retrieval+generation round. Returns (questions, best_score)."""
         hint = self._CATEGORY_QUERY_HINT.get(category or "", "")
-        query = f"{job_role}. {prompt}. {hint}".strip()
+        clean_prompt = (prompt or "").strip()
+        is_custom_prompt = bool(
+            clean_prompt and not clean_prompt.lower().startswith("generate interview questions")
+        )
+        query = clean_prompt if is_custom_prompt else f"{job_role}. {clean_prompt}"
+        if not is_custom_prompt and hint:
+            query = f"{query}. {hint}"
+
         k = max(top_k or 0, n)
         contexts = self.retriever.retrieve(query, k=k, doc_ids=document_ids or None)
         best_score = max((c.score for c in contexts), default=0.0)
-        if not contexts or best_score < settings.answerability_threshold:
+        relevance_threshold = max(
+            settings.answerability_threshold,
+            settings.prompt_scope_threshold if is_custom_prompt else 0.0,
+        )
+        if not contexts or best_score < relevance_threshold:
             return [], best_score
 
         generator = get_generator()
@@ -240,35 +254,7 @@ class RagPipeline:
             self._make_question(start_idx + i, qa, contexts, ctx_vecs, force_type=force)
             for i, qa in enumerate(raw_qas)
         ]
-        return questions, best_score
-
-    def _out_of_scope(self, job_role, prompt, top_k, document_ids, best_score) -> QAResult:
-        return QAResult(
-            job_role=job_role,
-            prompt=prompt,
-            top_k=top_k,
-            document_ids=document_ids or [],
-            questions=[
-                Question(
-                    id="q1",
-                    question=f"Generate interview questions for a {job_role}.",
-                    answer=(
-                        "This prompt appears to be out of scope: no sufficiently "
-                        "relevant passages were found in the selected documents. "
-                        "Upload or select documents related to this role."
-                    ),
-                    type="knowledge",
-                    confidence=round(float(best_score), 2),
-                    answerable=False,
-                    sources=[],
-                    sub_type="fundamentals",
-                    options=["A", "B", "C", "D"],
-                    correct_option=0,
-                    explanation="No relevant context found.",
-                    expected_time_seconds=30,
-                )
-            ],
-        )
+        return [question for question in questions if question.answerable], best_score
 
     def generate_qa(
         self,
@@ -291,8 +277,6 @@ class RagPipeline:
             q_type = "both" if two_round else "mixed"
 
         def _finish(questions, best):
-            if not questions:
-                return self._out_of_scope(job_role, prompt, top_k, document_ids, best)
             for i, q in enumerate(questions, start=1):
                 q.id = f"q{i}"
             return QAResult(job_role, prompt, top_k, used_docs, questions)
@@ -302,7 +286,12 @@ class RagPipeline:
             qs, best = self._generate_round(
                 job_role, prompt, top_k, document_ids, total, q_type, 1
             )
-            return _finish(qs, best)
+            if len(qs) < total:
+                extra_qs, _ = self._generate_round(
+                    job_role, prompt, top_k, document_ids, total - len(qs), q_type, len(qs) + 1
+                )
+                qs.extend(extra_qs)
+            return _finish(qs[:total], best)
 
         # Two-round: Knowledge then Skill, each with its own retrieval.
         if q_type == "both":
@@ -314,13 +303,25 @@ class RagPipeline:
             s_qs, s_best = self._generate_round(
                 job_role, prompt, top_k, document_ids, n_skill, "skill", len(k_qs) + 1
             )
-            return _finish(k_qs + s_qs, max(k_best, s_best))
+            combined = k_qs + s_qs
+            if len(combined) < total:
+                missing = total - len(combined)
+                extra_qs, _ = self._generate_round(
+                    job_role, prompt, top_k, document_ids, missing, None, len(combined) + 1
+                )
+                combined.extend(extra_qs)
+            return _finish(combined[:total], max(k_best, s_best))
 
         # Mixed single round (no explicit type requested).
         questions, best = self._generate_round(
             job_role, prompt, top_k, document_ids, total, None, 1
         )
-        return _finish(questions, best)
+        if len(questions) < total:
+            extra_qs, _ = self._generate_round(
+                job_role, prompt, top_k, document_ids, total - len(questions), None, len(questions) + 1
+            )
+            questions.extend(extra_qs)
+        return _finish(questions[:total], best)
 
 
 def new_question_id() -> str:

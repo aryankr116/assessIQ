@@ -424,8 +424,11 @@ function synthesizeQASet({
     knowledge: ["fundamentals", "understanding"],
     skill: ["apply", "analyse"],
   };
+  const cleanPrompt = (prompt || "").trim();
+  const isCustomPrompt = cleanPrompt && !cleanPrompt.toLowerCase().startsWith("generate interview questions");
+
   const mk = (d, type, i) => {
-    const topic = extractTopic(d.name, d.excerpt);
+    const topic = isCustomPrompt ? cleanPrompt : extractTopic(d.name, d.excerpt);
     const pool = subTypesByType[type] || ["fundamentals", "understanding", "apply", "analyse"];
     const subType = pool[i % pool.length];
     const bank = mcqBank[subType];
@@ -517,8 +520,15 @@ function createHttpClient() {
       ...options,
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`API ${res.status}: ${text || res.statusText}`);
+      let msg = res.statusText;
+      try {
+        const errJson = await res.json();
+        msg = errJson.detail || errJson.message || JSON.stringify(errJson);
+      } catch {
+        const text = await res.text().catch(() => "");
+        msg = text || res.statusText;
+      }
+      throw new Error(msg);
     }
     return res.status === 204 ? null : res.json();
   }

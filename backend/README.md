@@ -116,8 +116,8 @@ All providers ground answers strictly in retrieved context and flag unanswerable
 
 ## How grounding & answerability work
 
-- **Retrieval gate:** if the best chunk similarity for a prompt is below `ASSESSIQ_ANSWERABILITY_THRESHOLD`, the prompt is returned as *out-of-scope* instead of generating answers.
-- **Per-answer grounding:** each generated answer is matched back to its most similar retrieved chunk; that similarity becomes the displayed **confidence**, and the chunk becomes the cited **source**. Answers that don't ground well are marked not answerable.
+- **Retrieval gate:** if the best chunk similarity for a prompt is below `ASSESSIQ_ANSWERABILITY_THRESHOLD`, generation is skipped. Custom focus prompts use the stricter `ASSESSIQ_PROMPT_SCOPE_THRESHOLD` (default `0.32`) and are matched against documents without adding the job title to the retrieval query, so incidental word overlap or a coincidental role/document match cannot make an unrelated resource seem relevant.
+- **Per-answer grounding:** each generated answer is matched back to its most similar retrieved chunk; that similarity becomes the displayed **confidence**, and the chunk becomes the cited **source**. Unanswerable or weakly grounded questions are excluded. If no questions remain, `POST /api/generate` returns `422` with guidance to choose relevant documents.
 
 ## Tested
 

@@ -92,6 +92,11 @@ class Settings:
     answerability_threshold: float = float(
         os.getenv("ASSESSIQ_ANSWERABILITY_THRESHOLD", "0.05")
     )
+    # Custom focus prompts need a stronger match so incidental word overlap
+    # (for example, "arrays" in a recipe list) does not trigger generation.
+    prompt_scope_threshold: float = float(
+        os.getenv("ASSESSIQ_PROMPT_SCOPE_THRESHOLD", "0.32")
+    )
 
     # --- Generation provider --------------------------------------------
     # one of: "openai", "gemini", "ollama", "offline"

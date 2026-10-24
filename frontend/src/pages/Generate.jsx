@@ -371,7 +371,7 @@ export default function Generate() {
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
                   2
                 </span>
-                Prompt <span className="text-slate-400 font-normal">(optional)</span>
+                Prompt
               </label>
               <textarea
                 value={prompt}
