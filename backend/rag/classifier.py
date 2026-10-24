@@ -99,4 +99,13 @@ def classify_question(question: str) -> Classification:
 
     # Map the margin into a readable confidence (0.5 = coin-flip, ->1 = clear).
     confidence = float(min(0.99, 0.55 + margin * 2.2))
+
+    # An explicit, unopposed action/concept cue is strong classification
+    # evidence. The raw semantic margin is often small for short questions,
+    # so keep its heuristic confidence from understating clear wording.
+    if label == "skill" and s_cues and not k_cues:
+        confidence = max(confidence, min(0.99, 0.93 + 0.02 * (s_cues - 1)))
+    elif label == "knowledge" and k_cues and not s_cues:
+        confidence = max(confidence, min(0.99, 0.93 + 0.02 * (k_cues - 1)))
+
     return Classification(type=label, confidence=round(confidence, 2))
