@@ -40,6 +40,37 @@ class GeneratedQA:
     expected_time_seconds: int = 60  # estimated time for candidate
 
 
+def _split_focus_topics(focus: str) -> List[str]:
+    clean_focus = re.sub(r"\s+", " ", (focus or "")).strip()
+    clean_focus = re.sub(
+        r"^(?:focus on|emphasize|emphasise|target|cover|include)\s+",
+        "",
+        clean_focus,
+        flags=re.IGNORECASE,
+    )
+    topics = [
+        topic.strip(" \t.,;:")
+        for topic in re.split(r"\s*(?:,|;|&|\band\b)\s*", clean_focus, flags=re.IGNORECASE)
+    ]
+    return [topic for topic in topics if topic]
+
+
+def _topic_question_plan(topics: List[str], n: int, question_offset: int = 0) -> str:
+    if len(topics) < 2:
+        return ""
+    assignments = [
+        f"Question {question_offset + i + 1}: {topics[(question_offset + i) % len(topics)]}"
+        for i in range(n)
+    ]
+    return (
+        "Balanced topic coverage is required. Distribute questions as evenly as possible "
+        "across every listed topic; do not let the first topic dominate. Follow this "
+        "per-question assignment exactly:\n- "
+        + "\n- ".join(assignments)
+        + "\n\n"
+    )
+
+
 SYSTEM_PROMPT = (
     "You are AssessIQ, an expert technical interview kit generator. You create "
     "MCQ (Multiple Choice Question) interview questions with 4 options each.\n"
@@ -89,6 +120,7 @@ def _build_user_prompt(
     contexts: List[RetrievedChunk],
     n: int,
     category: str | None = None,
+    question_offset: int = 0,
 ) -> str:
     # Send the FULL text of every retrieved chunk so the model has maximal
     # grounding material. Token budget is not a constraint for this deployment,
@@ -124,6 +156,8 @@ def _build_user_prompt(
     is_custom_focus = bool(
         clean_focus and not clean_focus.lower().startswith("generate interview questions")
     )
+    topics = _split_focus_topics(clean_focus) if is_custom_focus else []
+    topic_plan = _topic_question_plan(topics, n, question_offset)
 
     if is_custom_focus:
         directive = (
@@ -135,7 +169,8 @@ def _build_user_prompt(
             f"Context Grounding Rules:\n"
             f"1. If the context passages above are RELEVANT to '{clean_focus}', use them to ground and inform your questions.\n"
             f"2. If the context passages do not support '{clean_focus}' for this role, do not generate questions on unrelated context or on unsupported topics.\n\n"
-            f"Generate up to {n} MCQ interview questions specifically on '{clean_focus}' when supported by the passages. {cat_line}\n\n"
+            f"{topic_plan}"
+            f"Generate up to {n} MCQ interview questions specifically covering '{clean_focus}' when supported by the passages. {cat_line}\n\n"
         )
     else:
         directive = (
@@ -283,13 +318,15 @@ class OpenAIProvider:
         self.model = settings.openai_model
         self.models = [self.model]
 
-    def _generate_batch(self, job_role, focus, contexts, n, category, model=None) -> List[GeneratedQA]:
+    def _generate_batch(
+        self, job_role, focus, contexts, n, category, model=None, question_offset=0
+    ) -> List[GeneratedQA]:
         import time
         import logging
 
         logger = logging.getLogger("rag.generator")
         model = model or self.model
-        max_retries = 4
+        max_retries = 3
         backoff = 3.0
         # Enough headroom that a full set is never truncated, but bounded so a
         # single request doesn't blow past the provider's tokens-per-minute
@@ -302,7 +339,12 @@ class OpenAIProvider:
                     model=model,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": _build_user_prompt(job_role, focus, contexts, n, category)},
+                        {
+                            "role": "user",
+                            "content": _build_user_prompt(
+                                job_role, focus, contexts, n, category, question_offset
+                            ),
+                        },
                     ],
                     temperature=0.3,
                     max_tokens=max_tokens,
@@ -320,12 +362,9 @@ class OpenAIProvider:
                 logger.warning(
                     f"Generator returned no parseable questions (finish_reason={finish})."
                 )
-                # A truncated/empty response is often transient (verbose thinking
-                # or a glitch) — retry rather than give up on the whole batch.
-                if attempt < max_retries - 1:
-                    time.sleep(backoff)
-                    backoff *= 2.0
-                    continue
+                # Retrying an invalid but successfully completed response with
+                # identical input usually produces the same result. Reserve
+                # backoff retries for actual transient provider errors.
                 break
             except Exception as e:
                 err_msg = str(e).lower()
@@ -357,21 +396,27 @@ class OpenAIProvider:
 
         return []
 
-    def _generate_with_model(self, model, job_role, focus, contexts, n, category) -> List[GeneratedQA]:
+    def _generate_with_model(
+        self, model, job_role, focus, contexts, n, category, question_offset=0
+    ) -> List[GeneratedQA]:
         results: List[GeneratedQA] = []
         remaining = n
         attempts = 0
         while remaining > 0 and attempts < 3:
             attempts += 1
             batch_n = min(self._BATCH_SIZE, remaining)
-            batch = self._generate_batch(job_role, focus, contexts, batch_n, category, model)
+            batch = self._generate_batch(
+                job_role, focus, contexts, batch_n, category, model, question_offset + len(results)
+            )
             if not batch:
                 break
             results.extend(batch)
             remaining = n - len(results)
         return results[:n]
 
-    def generate(self, job_role, focus, contexts, n, category=None) -> List[GeneratedQA]:
+    def generate(
+        self, job_role, focus, contexts, n, category=None, question_offset=0
+    ) -> List[GeneratedQA]:
         import logging
 
         logger = logging.getLogger("rag.generator")
@@ -380,7 +425,9 @@ class OpenAIProvider:
         # primary as soon as it delivers the full set; otherwise keep the best
         # partial result and try the next model.
         for model in self.models:
-            results = self._generate_with_model(model, job_role, focus, contexts, n, category)
+            results = self._generate_with_model(
+                model, job_role, focus, contexts, n, category, question_offset
+            )
             if len(results) >= n:
                 return results[:n]
             if len(results) > len(best):
@@ -431,14 +478,21 @@ class GeminiProvider(OpenAIProvider):
 class OllamaProvider:
     name = "ollama"
 
-    def generate(self, job_role, focus, contexts, n, category=None) -> List[GeneratedQA]:
+    def generate(
+        self, job_role, focus, contexts, n, category=None, question_offset=0
+    ) -> List[GeneratedQA]:
         import requests
 
         payload = {
             "model": settings.ollama_model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": _build_user_prompt(job_role, focus, contexts, n, category)},
+                {
+                    "role": "user",
+                    "content": _build_user_prompt(
+                        job_role, focus, contexts, n, category, question_offset
+                    ),
+                },
             ],
             "stream": False,
             "format": "json",
@@ -448,7 +502,9 @@ class OllamaProvider:
         r.raise_for_status()
         content = r.json().get("message", {}).get("content", "")
         parsed = _parse_json_array(content, n)
-        return parsed or OfflineProvider().generate(job_role, focus, contexts, n, category)
+        return parsed or OfflineProvider().generate(
+            job_role, focus, contexts, n, category, question_offset
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +587,9 @@ class OfflineProvider:
         last = cut.rfind(". ")
         return (cut[: last + 1] if last > 80 else cut).strip() + " …"
 
-    def generate(self, job_role, focus, contexts, n, category=None) -> List[GeneratedQA]:
+    def generate(
+        self, job_role, focus, contexts, n, category=None, question_offset=0
+    ) -> List[GeneratedQA]:
         if not contexts:
             default_sub = "fundamentals" if category == "knowledge" else "apply"
             return [
@@ -557,10 +615,15 @@ class OfflineProvider:
         is_custom_focus = bool(
             clean_focus and not clean_focus.lower().startswith("generate interview questions")
         )
+        topics = _split_focus_topics(clean_focus) if is_custom_focus else []
 
         out: List[GeneratedQA] = []
         for i, c in enumerate(contexts):
-            topic = clean_focus if is_custom_focus else self._topic(c.text)
+            topic = (
+                topics[(question_offset + i) % len(topics)]
+                if len(topics) > 1
+                else clean_focus if is_custom_focus else self._topic(c.text)
+            )
             core_summary = self._first_sentences(c.text, max_chars=320)
 
             # Cycle through sub_types evenly based on category

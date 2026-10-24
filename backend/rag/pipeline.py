@@ -246,7 +246,9 @@ class RagPipeline:
             return [], best_score
 
         generator = get_generator()
-        raw_qas = generator.generate(job_role, prompt, contexts, n, category)
+        raw_qas = generator.generate(
+            job_role, prompt, contexts, n, category, question_offset=start_idx - 1
+        )
         ctx_vecs = embed_texts([c.text for c in contexts])
 
         force = category if category in ("knowledge", "skill") else None
