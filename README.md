@@ -1,8 +1,22 @@
 # AssessIQ
 
-This repository contains the backend ingestion system for extracting and structuring unstructured documents.
+AssessIQ generates job-specific interview questions grounded in uploaded documents. It includes a React frontend and a FastAPI backend for document extraction, indexing, question generation, and answer grounding.
 
 ## Setup for collaborators
+
+### Run the full application (recommended)
+
+Install and start Docker Desktop, then run this from the repository root:
+
+```powershell
+docker compose up --build
+```
+
+Open `http://localhost:8080`. This starts the frontend and backend together. In this mode, uploads are checked for at least **15,000 extracted characters** before indexing. The standalone frontend's mock mode simulates uploads and does not enforce this backend check.
+
+Stop the app with `Ctrl+C`, then run `docker compose down`. Add `-v` only if you also want to delete the Docker-stored application data.
+
+### Run the document-ingestion CLI
 
 1. Create and activate a virtual environment.
 

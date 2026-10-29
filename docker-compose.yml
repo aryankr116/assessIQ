@@ -16,27 +16,17 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     expose:
       - "5432"
     # Uncomment to connect from host for debugging:
     # ports:
     #   - "5432:5432"
-
-  chroma:
-    image: ghcr.io/chroma-core/chroma:latest
-    container_name: assessiq_chroma
-    expose:
-      - "8000"
-    environment:
-      IS_PERSISTENT: "true"
-      CHROMA_DB_DIR: /chroma_data
-    volumes:
-      - chroma_data:/chroma_data
-    depends_on:
-      - postgres
-    # Uncomment to reach Chroma directly from the host:
-    # ports:
-    #   - "8001:8000"
 
   backend:
     build:
@@ -48,10 +38,13 @@ services:
     environment:
       ASSESSIQ_LLM_PROVIDER: ${ASSESSIQ_LLM_PROVIDER:-offline}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-}
       ASSESSIQ_DATA_DIR: /data
+      ASSESSIQ_MIN_DOCUMENT_CHARS: ${ASSESSIQ_MIN_DOCUMENT_CHARS:-15000}
       ASSESSIQ_SECRET: ${ASSESSIQ_SECRET:-change-me-in-production}
-      ASSESSIQ_VECTOR_DB: ${ASSESSIQ_VECTOR_DB:-chroma}
-      CHROMA_URL: http://chroma:8000
+      ASSESSIQ_VECTOR_DB: faiss
       ASSESSIQ_USE_SQL_DB: "true"
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -62,11 +55,19 @@ services:
       - assessiq_data:/data
     depends_on:
       postgres:
-        condition: service_started
-      chroma:
-        condition: service_started
+        condition: service_healthy
     expose:
       - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     # Uncomment to reach the API directly from the host for debugging:
     # ports:
     #   - "8000:8000"
@@ -81,9 +82,9 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   assessiq_data:
-  chroma_data:
   postgres_data:

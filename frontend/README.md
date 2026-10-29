@@ -40,7 +40,9 @@ npm run preview
 
 ## Mock mode vs. live backend
 
-The app ships in **mock mode** — it runs standalone with realistic in-memory demo data, so you can develop and demo the UI before the QA-generation API exists.
+The frontend's default `.env.example` selects **mock mode**. Mock mode runs standalone with in-memory demo data: uploads and ingestion are simulated, and the backend's 15,000-character document check does not run.
+
+To try the real upload, document-length validation, and generation flows, run the full application from the repository root with `docker compose up --build`, then open `http://localhost:8080`. This starts both the frontend and backend in real mode.
 
 All backend communication is isolated in a single file: **`src/api/client.js`**. It exposes one interface with two implementations (`createMockClient` and `createHttpClient`). Switching is config-only — no UI changes:
 
@@ -50,7 +52,7 @@ VITE_API_MODE=real
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
-### Endpoints the live backend must provide
+### Backend API endpoints
 
 The HTTP client expects these endpoints; response shapes should match the objects in `src/api/mockData.js`.
 
@@ -112,4 +114,4 @@ frontend/
 
 - **Privacy by design:** the UI reinforces the closed-domain model — answers are grounded only in uploaded files, and out-of-scope prompts are flagged rather than answered.
 - The mock client simulates the ingestion pipeline advancing through *extracting → chunking → indexed* over a few seconds, and `AppContext` polls while any document is still processing.
-- To wire the real pipeline, implement the endpoints above on your FastAPI backend and flip `VITE_API_MODE=real`.
+- Run the FastAPI backend and set `VITE_API_MODE=real` to use the real pipeline.

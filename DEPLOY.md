@@ -28,13 +28,20 @@ From the project root:
 docker compose up --build
 ```
 
-Open **http://localhost:8080**. Log in with the demo accounts or `admin` / `admin123`,
-upload a document, and generate. Stored data persists in a Docker volume.
+Open **http://localhost:8080**. Log in with `admin` / `admin123`, upload a document,
+and generate. Stored data persists in Docker volumes. This full-stack mode connects
+the frontend to the backend, so uploads are checked against the 15,000-character
+minimum (measured after text extraction and cleanup).
 
 - Stop it: press **Ctrl+C**, then `docker compose down` (add `-v` to also delete stored data).
+- The standalone frontend container and static mock hosting do not run backend
+  ingestion or enforce the document-content minimum; use the full Docker Compose
+  stack to demonstrate real upload validation.
 - **LLM quality:** by default the backend uses the offline generator. For OpenAI-quality
-  questions, create a `.env` file next to `docker-compose.yml` containing
-  `ASSESSIQ_LLM_PROVIDER=openai` and `OPENAI_API_KEY=sk-...`, then re-run `docker compose up --build`.
+  questions, create a root `.env` file next to `docker-compose.yml` containing
+  `ASSESSIQ_LLM_PROVIDER=openai` and `OPENAI_API_KEY=...`, then restart the stack.
+  Compose reads this root `.env`; `backend/.env` is not automatically passed into
+  containers.
 - **Real embeddings (Sentence-Transformers + FAISS):** in `docker-compose.yml` set
   `INSTALL_ML: "true"` under the backend build args, then rebuild. The image gets much
   larger and the first build is slower, but retrieval quality improves. (Default uses the
