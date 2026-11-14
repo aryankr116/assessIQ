@@ -17,7 +17,7 @@ This is the UI layer. It pairs with the Python ingestion/RAG backend in the [`ba
 |-------|--------|---------|
 | `/` | **Dashboard** | Overview, ingestion stats, Knowledge/Skill split, recent question sets |
 | `/documents` | **Document Library** | Drag-and-drop upload, ingestion status (extract → chunk → index), chunk counts |
-| `/generate` | **Generate Q&A** | Job-role prompt, top-k depth, **two-round toggle**, document selection, grounded results |
+| `/generate` | **Generate Q&A** | Job profile, top-k depth, **two-round toggle**, document selection, grounded results |
 | `/results` | **Results & Export** | Browse sets, filter, search, **rate questions**, **delete sets**, export JSON / CSV |
 | `/admin` | **Admin** *(admin role only)* | View user accounts, tune system parameters |
 
@@ -40,7 +40,7 @@ npm run preview
 
 ## Mock mode vs. live backend
 
-The frontend's default `.env.example` selects **mock mode**. Mock mode runs standalone with in-memory demo data: uploads and ingestion are simulated, and the backend's 15,000-character document check does not run.
+The frontend's default `.env.example` selects **mock mode**. Mock mode runs standalone with in-memory demo data: uploads and ingestion are simulated, and the backend's 15,000-character document check and job-description extraction do not run.
 
 To try the real upload, document-length validation, and generation flows, run the full application from the repository root with `docker compose up --build`, then open `http://localhost:8080`. This starts both the frontend and backend in real mode.
 
@@ -62,7 +62,9 @@ The HTTP client expects these endpoints; response shapes should match the object
 | `POST` | `/api/documents` | `Document` | `multipart/form-data`, field `file` |
 | `DELETE` | `/api/documents/:id` | `204` | Remove a document |
 | `GET` | `/api/qa-sets` | `QASet[]` | Past generations |
-| `POST` | `/api/generate` | `QASet` | Body: `{ jobRole, prompt, topK, documentIds }` |
+| `POST` | `/api/job-profiles` | `JobProfile` | Body: `{ name }` |
+| `POST` | `/api/job-profiles/with-description` | `JobProfile` | Multipart `name` and `job_description` PDF; extracts skills and experience |
+| `POST` | `/api/generate` | `QASet` | Body: `{ jobRole, jobProfileId, topK, documentIds }`; the selected profile supplies skills and experience |
 | `GET` | `/api/stats` | `Stats` | Dashboard aggregates |
 
 A Vite dev proxy for `/api` is pre-wired (commented) in `vite.config.js`.

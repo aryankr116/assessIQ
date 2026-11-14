@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import warnings
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 warnings.filterwarnings("ignore", message=".*alias.*attribute.*has no effect.*")
@@ -74,6 +74,7 @@ class GenerateRequest(CamelModel):
     document_ids: List[str] = []
     two_round: bool = False  # generate Knowledge then Skill in separate rounds
     question_type: Optional[str] = None  # "both", "knowledge", "skill"
+    job_profile_id: Optional[str] = None
 
 
 class RatingRequest(CamelModel):
@@ -125,6 +126,10 @@ class JobProfile(CamelModel):
     id: str
     name: str
     created_at: str
+    skills: List[str] = Field(default_factory=list)
+    experience_requirement: Optional[str] = None
+    difficulty_level: Optional[str] = None
+    job_description_name: Optional[str] = None
 
 
 class JobProfileCreateRequest(CamelModel):

@@ -18,6 +18,7 @@ import { Card, Button, EmptyState, StatusBadge } from "../components/ui.jsx";
 import { formatDateTime, formatBytes } from "../lib/format.js";
 
 const ACCEPTED_DOCS = ".pdf,.docx,.txt,.pptx,.md,.png,.jpg,.jpeg,.tiff,.tif,.bmp";
+const ACCEPTED_JOB_DESCRIPTION = ".pdf,application/pdf";
 
 function ProfileCard({ profile, onDelete, onGenerate, onViewDocs }) {
   const [docs, setDocs] = useState([]);
@@ -135,8 +136,11 @@ export default function JobProfiles() {
   const [newProfileName, setNewProfileName] = useState("");
   const [creating, setCreating] = useState(false);
   const [pendingFiles, setPendingFiles] = useState([]);
+  const [jobDescriptionFile, setJobDescriptionFile] = useState(null);
+  const [profileError, setProfileError] = useState("");
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef(null);
+  const jobDescriptionInputRef = useRef(null);
 
   const profiles = useMemo(() => {
     if (!searchQuery.trim()) return jobProfiles;
@@ -163,14 +167,20 @@ export default function JobProfiles() {
     setShowAddProfile(false);
     setNewProfileName("");
     setPendingFiles([]);
+    setJobDescriptionFile(null);
+    setProfileError("");
   }
 
   async function handleCreate(e) {
     e.preventDefault();
     if (!newProfileName.trim()) return;
     setCreating(true);
+    setProfileError("");
     try {
-      const profile = await createJobProfile({ name: newProfileName.trim() });
+      const profile = await createJobProfile({
+        name: newProfileName.trim(),
+        jobDescriptionFile: jobDescriptionFile || undefined,
+      });
       // Upload any pending files to the new profile
       for (const file of pendingFiles) {
         await uploadDocument(profile.id, file);
@@ -178,6 +188,8 @@ export default function JobProfiles() {
       resetModal();
       // Navigate to the new profile's documents page
       navigate(`/job-profiles/${profile.id}/documents`);
+    } catch (error) {
+      setProfileError(error.message || "Could not create the job profile.");
     } finally {
       setCreating(false);
     }
@@ -281,6 +293,56 @@ export default function JobProfiles() {
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Job Description <span className="text-slate-400 font-normal">(optional PDF)</span>
+                </label>
+                <input
+                  ref={jobDescriptionInputRef}
+                  type="file"
+                  accept={ACCEPTED_JOB_DESCRIPTION}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file && !file.name.toLowerCase().endsWith(".pdf")) {
+                      setProfileError("Job descriptions must be PDF files.");
+                    } else {
+                      setProfileError("");
+                      setJobDescriptionFile(file || null);
+                    }
+                    e.target.value = "";
+                  }}
+                />
+                <div className="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2.5">
+                  <button
+                    type="button"
+                    onClick={() => jobDescriptionInputRef.current?.click()}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-slate-600 transition hover:text-brand-600"
+                  >
+                    <Upload size={14} className="shrink-0 text-slate-400" />
+                    <span className="truncate">
+                      {jobDescriptionFile?.name || "Upload a PDF to extract required skills and experience"}
+                    </span>
+                  </button>
+                  {jobDescriptionFile && (
+                    <button
+                      type="button"
+                      aria-label="Remove job description"
+                      onClick={() => {
+                        setJobDescriptionFile(null);
+                        setProfileError("");
+                      }}
+                      className="rounded p-1 text-slate-400 hover:text-red-500"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+                <p className="mt-1 text-[10px] text-slate-400">
+                  Extracted skills guide question topics; stated experience calibrates question difficulty.
+                </p>
+              </div>
+
               {/* Document Upload Area */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -315,6 +377,12 @@ export default function JobProfiles() {
                     PDF, DOCX, TXT, PPTX, MD, images
                   </p>
                 </div>
+
+                {profileError && (
+                  <p role="alert" className="text-xs font-semibold text-red-600">
+                    {profileError}
+                  </p>
+                )}
 
                 {/* Pending Files List */}
                 {pendingFiles.length > 0 && (
@@ -353,7 +421,7 @@ export default function JobProfiles() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" size="sm" disabled={creating}>
+                <Button type="submit" size="sm" disabled={creating || Boolean(profileError)}>
                   {creating ? (
                     "Creating..."
                   ) : pendingFiles.length > 0 ? (

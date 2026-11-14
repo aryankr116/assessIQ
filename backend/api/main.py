@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 import uuid
 from datetime import datetime, timezone
 
@@ -19,7 +20,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..rag.config import settings
 from ..rag.embeddings import get_embedder
+from ..rag.job_description import (
+    experience_difficulty_level,
+    extract_experience_requirement,
+    extract_skills,
+)
 from ..rag.vector_store import VectorStore
+from ..ingest import clean_text
+from ..text_extractor.extractors import extract_text_from_file
 from ..db_service import get_db_service
 from .schemas import (
     Document,
@@ -236,20 +244,94 @@ def set_params(patch: dict, _: dict = Depends(auth.require_admin)):
 # --- Job Profiles --------------------------------------------------------
 @app.get("/api/job-profiles")
 def list_job_profiles():
-    return get_store().list_job_profiles()
+    profiles = get_store().list_job_profiles()
+    for profile in profiles:
+        requirement = profile.get("experienceRequirement")
+        if requirement:
+            profile["difficultyLevel"] = experience_difficulty_level(requirement)
+    return profiles
 
 
 @app.post("/api/job-profiles")
 def create_job_profile(req: JobProfileCreateRequest, _: dict = Depends(auth.require_user)):
+    return _save_job_profile(req.name)
+
+
+def _save_job_profile(
+    name: str,
+    *,
+    skills: list[str] | None = None,
+    experience_requirement: str | None = None,
+    difficulty_level: str | None = None,
+    job_description_name: str | None = None,
+):
+    if not name.strip():
+        raise HTTPException(status_code=422, detail="Job role name is required.")
     store = get_store()
     profile_id = "jp_" + uuid.uuid4().hex[:10]
     profile = JobProfile(
         id=profile_id,
-        name=req.name,
+        name=name.strip(),
         created_at=_now_iso(),
+        skills=skills or [],
+        experience_requirement=experience_requirement,
+        difficulty_level=difficulty_level,
+        job_description_name=job_description_name,
     ).model_dump(by_alias=True)
     store.upsert_job_profile(profile)
     return profile
+
+
+@app.post("/api/job-profiles/with-description")
+async def create_job_profile_with_description(
+    name: str = Form(...),
+    job_description: UploadFile = File(...),
+    _: dict = Depends(auth.require_user),
+):
+    filename = job_description.filename or ""
+    if os.path.splitext(filename)[1].lower() != ".pdf":
+        raise HTTPException(status_code=422, detail="Job description must be a PDF file.")
+
+    content = await job_description.read()
+    if b"%PDF-" not in content[:1024]:
+        raise HTTPException(status_code=422, detail="The uploaded file is not a valid PDF.")
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
+            temp_file.write(content)
+            temp_path = temp_file.name
+        extracted = clean_text(extract_text_from_file(temp_path))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not extract text from the job description PDF: {exc}",
+        ) from exc
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    if len(extracted) < 30:
+        raise HTTPException(
+            status_code=422,
+            detail="The job description PDF contains too little readable text.",
+        )
+
+    skills = extract_skills(extracted)
+    if not skills:
+        raise HTTPException(
+            status_code=422,
+            detail="No recognizable skills were found in the job description PDF.",
+        )
+
+    experience_requirement, difficulty_level = extract_experience_requirement(extracted)
+    return _save_job_profile(
+        name,
+        skills=skills,
+        experience_requirement=experience_requirement,
+        difficulty_level=difficulty_level,
+        job_description_name=os.path.basename(filename),
+    )
 
 
 @app.delete("/api/job-profiles/{profile_id}", status_code=204)
@@ -380,21 +462,37 @@ def list_qa_sets():
 @app.post("/api/generate")
 def generate_qa(req: GenerateRequest, _: dict = Depends(auth.require_user)):
     store = get_store()
-    prompt = req.prompt or f"Generate interview questions for a {req.job_role}."
+    job_role = req.job_role
+    prompt = req.prompt
+    experience_requirement = None
+    difficulty_level = None
+    if req.job_profile_id:
+        profile = store.job_profiles.get(req.job_profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Job profile not found.")
+        job_role = profile["name"]
+        skills = profile.get("skills") or []
+        if skills:
+            prompt = ", ".join(skills)
+        experience_requirement = profile.get("experienceRequirement")
+        difficulty_level = experience_difficulty_level(experience_requirement)
+    prompt = prompt or f"Generate interview questions for a {job_role}."
     try:
         result = store.pipeline.generate_qa(
-            job_role=req.job_role,
+            job_role=job_role,
             prompt=prompt,
             top_k=req.top_k or settings.default_top_k,
             document_ids=req.document_ids or None,
             two_round=req.two_round,
             num_questions=req.num_questions,
             question_type=req.question_type,
+            experience_requirement=experience_requirement,
+            difficulty_level=difficulty_level,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if not result.questions:
-        focus = (req.prompt or "").strip()
+        focus = prompt.strip()
         if focus and not focus.lower().startswith("generate interview questions"):
             detail = (
                 f"The selected document(s) don't appear to match your prompt: "

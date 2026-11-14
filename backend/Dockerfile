@@ -19,13 +19,13 @@ WORKDIR /app
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tesseract-ocr \
  && rm -rf /var/lib/apt/lists/* \
- && pip install \
+ && pip install --retries 10 --timeout 300 \
       fastapi "uvicorn[standard]" python-multipart "pydantic>=2.0" numpy \
       openai requests python-dotenv \
       pymupdf python-docx python-pptx pdfminer.six \
       sqlalchemy "psycopg2-binary" google-auth Pillow pytesseract \
  && if [ "$INSTALL_ML" = "true" ]; then \
-      pip install sentence-transformers faiss-cpu ; \
+      pip install --retries 10 --timeout 300 sentence-transformers faiss-cpu ; \
     fi
 
 # App code (the `backend` package).

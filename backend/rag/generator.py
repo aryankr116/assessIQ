@@ -71,6 +71,17 @@ def _topic_question_plan(topics: List[str], n: int, question_offset: int = 0) ->
     )
 
 
+def _balanced_subtype_plan(category: str | None, n: int) -> List[str]:
+    subtype_groups = {
+        "knowledge": ("fundamentals", "understanding"),
+        "skill": ("apply", "analyse"),
+    }
+    subtypes = subtype_groups.get(category, (
+        "fundamentals", "understanding", "apply", "analyse"
+    ))
+    return [subtypes[i % len(subtypes)] for i in range(n)]
+
+
 SYSTEM_PROMPT = (
     "You are AssessIQ, an expert technical interview kit generator. You create "
     "MCQ (Multiple Choice Question) interview questions with 4 options each.\n"
@@ -79,7 +90,7 @@ SYSTEM_PROMPT = (
     "2. Do NOT reference document names, page numbers, or specific values from the context passages.\n"
     "3. Do NOT ask questions like 'According to the document, what is X?' or 'What value does the policy specify for Y?'.\n"
     "4. SCOPE: Every question must be relevant to the target role and any specific user focus, and must be answerable from relevant context passages. If the passages do not cover the requested scope, do not generate questions rather than switching to an unrelated topic or inventing unsupported questions. If no specific topic is provided, use the context passages to identify topic areas.\n"
-    "5. Frame questions around engineering concepts, architectural trade-offs, design patterns, troubleshooting reasoning, and scenario-based decision-making.\n"
+    "5. Frame questions around engineering concepts, design patterns, troubleshooting, and scenario-based decision-making. Reserve complex architectural trade-offs, large-scale production scenarios, and multi-constraint analysis for explicitly advanced questions.\n"
     "6. Each question must include a clear explanation of why the correct answer is correct.\n"
     "7. Each question has a TYPE and a SUB-TYPE:\n"
     "   TYPE 'knowledge' tests conceptual understanding. Use one of:\n"
@@ -103,13 +114,13 @@ _CATEGORY_INSTRUCTION = {
         "Generate ONLY Knowledge-Based MCQ questions — testing conceptual understanding of the technologies, "
         "patterns, and architecture principles found in the source material. Do NOT ask about specific values, "
         "thresholds, or configuration numbers from the documents. Instead ask 'why' and 'how' questions. "
-        "Mix 'fundamentals' (core concepts) and 'understanding' (deeper comprehension) sub-types evenly."
+        "Use only the knowledge sub-types: 'fundamentals' or 'understanding'."
     ),
     "skill": (
         "Generate ONLY Skill-Based MCQ questions — testing applied engineering judgment, troubleshooting reasoning, "
         "and scenario-based decision-making. Use the source material as context for realistic scenarios, "
         "NOT as a source of specific values to quiz on. "
-        "Mix 'apply' (hands-on application) and 'analyse' (reasoning/trade-offs) sub-types evenly."
+        "Use only the skill sub-types: 'apply' or 'analyse'."
     ),
 }
 
@@ -121,6 +132,8 @@ def _build_user_prompt(
     n: int,
     category: str | None = None,
     question_offset: int = 0,
+    experience_requirement: str | None = None,
+    difficulty_level: str | None = None,
 ) -> str:
     # Send the FULL text of every retrieved chunk so the model has maximal
     # grounding material. Token budget is not a constraint for this deployment,
@@ -152,6 +165,92 @@ def _build_user_prompt(
             f"- ~25% apply (practical scenarios, 60-100s expected)\n"
             f"- ~25% analyse (reasoning/trade-offs, 75-120s expected)\n\n"
         )
+    if difficulty_level == "beginner":
+        if category == "knowledge":
+            sub_type_hint = (
+                "Keep both knowledge sub-types accessible: fundamentals should test essentials, "
+                "and understanding should check basic comprehension. Avoid advanced edge cases.\n\n"
+            )
+        elif category == "skill":
+            sub_type_hint = (
+                "Keep both skill sub-types accessible: apply should use common tasks, and analyse "
+                "should involve only simple, bounded reasoning. Avoid senior-level architecture trade-offs.\n\n"
+            )
+        else:
+            sub_type_hint = (
+                "Keep every assigned sub-type foundational: test essential concepts and "
+                "straightforward practical scenarios, not advanced edge cases.\n\n"
+            )
+    elif difficulty_level == "intermediate":
+        if category == "knowledge":
+            sub_type_hint = (
+                "Use both knowledge sub-types at a working-practitioner level. Keep fundamentals "
+                "focused on core concepts and understanding on their practical effects; avoid "
+                "architecture comparisons, scale, and rare edge cases.\n\n"
+            )
+        elif category == "skill":
+            sub_type_hint = (
+                "Use both apply and analyse skill sub-types. Apply questions should use a familiar, "
+                "routine work scenario. Analyse questions should ask for limited, practical reasoning "
+                "about one local decision or consequence, not system architecture or multiple "
+                "competing constraints. Do not require scale optimization, incident command, or "
+                "senior-level design judgment.\n\n"
+            )
+        else:
+            sub_type_hint = "Balance all assigned sub-types at an intermediate working-practitioner level.\n\n"
+    elif difficulty_level == "advanced":
+        if category == "knowledge":
+            sub_type_hint = (
+                "Use both knowledge sub-types at an advanced technical depth; fundamentals may "
+                "test precise core principles, while understanding should probe deeper implications.\n\n"
+            )
+        elif category == "skill":
+            sub_type_hint = (
+                "Use both skill sub-types at an advanced technical depth; apply should involve "
+                "complex real-world execution, and analyse should examine deeper trade-offs. "
+                "Avoid routine beginner tasks.\n\n"
+            )
+        else:
+            sub_type_hint = (
+                "Use all assigned sub-types at an advanced technical depth; avoid routine beginner tasks.\n\n"
+            )
+    difficulty_instruction = ""
+    if difficulty_level == "beginner":
+        difficulty_instruction = (
+            "DIFFICULTY: FOUNDATIONAL / EASY.\n"
+            "- Test one essential concept or one straightforward action at a time.\n"
+            "- Use a direct question with no hidden constraints, multiple steps, or competing trade-offs.\n"
+            "- A candidate should be able to answer using basic knowledge, without production-scale experience.\n"
+            "- Do not add scenario complexity merely to make the wording longer.\n\n"
+        )
+    elif difficulty_level == "intermediate":
+        difficulty_instruction = (
+            "DIFFICULTY: INTERMEDIATE.\n"
+            "- Test solid working knowledge of one core concept or its routine use; use a familiar, bounded situation.\n"
+            "- Skill questions may use apply or analyse: analyse should require modest reasoning about one practical decision, not a multi-step diagnosis.\n"
+            "- A knowledge question may ask why/how one concept works or what ordinary result it produces.\n"
+            "- Do not require architecture design, comparing competing strategies, production-at-scale expertise, "
+            "rare edge cases, incident leadership, or balancing multiple constraints; those are advanced.\n"
+            "- Be a step beyond basic recall, but do not make the question expert-level by adding operational complexity.\n\n"
+        )
+    subtype_plan = _balanced_subtype_plan(category, n)
+    subtype_plan_instruction = (
+        "REQUIRED SUB-TYPE BALANCE: Use each sub-type exactly in this order; do not omit a "
+        "sub-type or substitute another. If the count is odd, the first listed sub-type gets "
+        "the extra question.\n"
+        + "\n".join(
+            f"- Question {i + 1}: {subtype}"
+            for i, subtype in enumerate(subtype_plan)
+        )
+        + "\n\n"
+    )
+    experience_instruction = ""
+    if experience_requirement:
+        experience_instruction = (
+            f"Experience calibration: The job description requires {experience_requirement} "
+            f"of experience. Set question complexity to the {difficulty_level or 'standard'} "
+            "level appropriate for that requirement.\n\n"
+        )
     clean_focus = (focus or "").strip()
     is_custom_focus = bool(
         clean_focus and not clean_focus.lower().startswith("generate interview questions")
@@ -181,6 +280,9 @@ def _build_user_prompt(
         )
 
     return (
+        f"{experience_instruction}"
+        f"{difficulty_instruction}"
+        f"{subtype_plan_instruction}"
         f"{directive}"
         f"IMPORTANT RULES:\n"
         f"- Each question MUST be a multiple-choice question with exactly 4 options.\n"
@@ -190,7 +292,7 @@ def _build_user_prompt(
         f"pseudocode style, table of contents, structure, publisher, author, how it presents things). "
         f"Ignore such passages entirely.\n"
         f"- Do NOT quiz on specific numbers, percentages, or configuration values from the context.\n"
-        f"- DO ask about concepts, patterns, trade-offs, scenarios, and engineering reasoning.\n"
+        f"- DO ask about concepts, patterns, scenarios, and engineering reasoning at the requested difficulty; reserve complex architectural trade-offs and multi-constraint analysis for advanced questions.\n"
         f"- ALWAYS provide 4 complete options, the correct_option index (0-3), and a 2-3 sentence explanation for every single question.\n"
         f"{sub_type_hint}"
         f"Respond with ONLY a JSON array, each item shaped as:\n"
@@ -319,7 +421,8 @@ class OpenAIProvider:
         self.models = [self.model]
 
     def _generate_batch(
-        self, job_role, focus, contexts, n, category, model=None, question_offset=0
+        self, job_role, focus, contexts, n, category, model=None, question_offset=0,
+        experience_requirement=None, difficulty_level=None,
     ) -> List[GeneratedQA]:
         import time
         import logging
@@ -342,7 +445,8 @@ class OpenAIProvider:
                         {
                             "role": "user",
                             "content": _build_user_prompt(
-                                job_role, focus, contexts, n, category, question_offset
+                                job_role, focus, contexts, n, category, question_offset,
+                                experience_requirement, difficulty_level,
                             ),
                         },
                     ],
@@ -397,7 +501,8 @@ class OpenAIProvider:
         return []
 
     def _generate_with_model(
-        self, model, job_role, focus, contexts, n, category, question_offset=0
+        self, model, job_role, focus, contexts, n, category, question_offset=0,
+        experience_requirement=None, difficulty_level=None,
     ) -> List[GeneratedQA]:
         results: List[GeneratedQA] = []
         remaining = n
@@ -406,7 +511,8 @@ class OpenAIProvider:
             attempts += 1
             batch_n = min(self._BATCH_SIZE, remaining)
             batch = self._generate_batch(
-                job_role, focus, contexts, batch_n, category, model, question_offset + len(results)
+                job_role, focus, contexts, batch_n, category, model, question_offset + len(results),
+                experience_requirement, difficulty_level,
             )
             if not batch:
                 break
@@ -415,7 +521,8 @@ class OpenAIProvider:
         return results[:n]
 
     def generate(
-        self, job_role, focus, contexts, n, category=None, question_offset=0
+        self, job_role, focus, contexts, n, category=None, question_offset=0,
+        experience_requirement=None, difficulty_level=None,
     ) -> List[GeneratedQA]:
         import logging
 
@@ -426,7 +533,8 @@ class OpenAIProvider:
         # partial result and try the next model.
         for model in self.models:
             results = self._generate_with_model(
-                model, job_role, focus, contexts, n, category, question_offset
+                model, job_role, focus, contexts, n, category, question_offset,
+                experience_requirement, difficulty_level,
             )
             if len(results) >= n:
                 return results[:n]
@@ -479,7 +587,8 @@ class OllamaProvider:
     name = "ollama"
 
     def generate(
-        self, job_role, focus, contexts, n, category=None, question_offset=0
+        self, job_role, focus, contexts, n, category=None, question_offset=0,
+        experience_requirement=None, difficulty_level=None,
     ) -> List[GeneratedQA]:
         import requests
 
@@ -490,7 +599,8 @@ class OllamaProvider:
                 {
                     "role": "user",
                     "content": _build_user_prompt(
-                        job_role, focus, contexts, n, category, question_offset
+                        job_role, focus, contexts, n, category, question_offset,
+                        experience_requirement, difficulty_level,
                     ),
                 },
             ],
@@ -503,7 +613,8 @@ class OllamaProvider:
         content = r.json().get("message", {}).get("content", "")
         parsed = _parse_json_array(content, n)
         return parsed or OfflineProvider().generate(
-            job_role, focus, contexts, n, category, question_offset
+            job_role, focus, contexts, n, category, question_offset,
+            experience_requirement, difficulty_level,
         )
 
 
@@ -541,6 +652,54 @@ class OfflineProvider:
             "Analyse the failure modes of \"{topic}\" — what breaks first and how do you mitigate it?",
             "How does \"{topic}\" impact overall system observability compared to a monolithic architecture?",
         ],
+    }
+    _DIFFICULTY_TEMPLATES = {
+        "beginner": {
+            "apply": [
+                "For a basic {role} task involving \"{topic}\", what is the most appropriate first action?",
+                "A {role} needs to use \"{topic}\" for a routine task. Which straightforward approach should they choose?",
+                "Which simple step would let a {role} apply \"{topic}\" to a common use case?",
+            ],
+            "analyse": [
+                "In a simple {role} task involving \"{topic}\", which result would you expect from the stated action?",
+                "Which basic observation best explains what happens when a {role} uses \"{topic}\" in this example?",
+                "For a straightforward use of \"{topic}\", which of these two simple outcomes is more likely?",
+            ],
+        },
+        "intermediate": {
+            "apply": [
+                "A {role} uses \"{topic}\" for a routine task. Which practical step is the most appropriate?",
+                "While using \"{topic}\" in a common {role} workflow, a teammate encounters a familiar problem. What should they do next?",
+                "Which example shows a {role} applying \"{topic}\" correctly in ordinary day-to-day work?",
+            ],
+            "analyse": [
+                "A {role} notices that \"{topic}\" has one practical limitation in a routine task. Which consequence should they expect?",
+                "For a common {role} task using \"{topic}\", which of these two straightforward approaches best fits the stated need?",
+                "A teammate uses \"{topic}\" in a familiar workflow. Which detail best explains the result they observe?",
+            ],
+            "understanding": [
+                "How does \"{topic}\" help a {role} with a common day-to-day task?",
+                "Why would a {role} use \"{topic}\" in a routine situation?",
+                "What is a likely practical result when a {role} uses \"{topic}\" for its intended purpose?",
+            ],
+        },
+        "advanced": {
+            "apply": [
+                "A {role} must apply \"{topic}\" while meeting strict reliability and latency targets. Which approach best balances both?",
+                "A production system using \"{topic}\" has a failure across dependent services. Which response best limits cascading impact?",
+                "How should a {role} adapt \"{topic}\" when scaling constraints conflict with consistency requirements?",
+            ],
+            "understanding": [
+                "Why might a large-scale system choose \"{topic}\" despite its consistency and operational trade-offs?",
+                "How does \"{topic}\" behave under partial failure, and what system-level consequences follow?",
+                "Which architectural trade-off is introduced by relying on \"{topic}\" at scale?",
+            ],
+            "analyse": [
+                "Compare the system-level trade-offs of two approaches to \"{topic}\" under conflicting reliability and scale goals.",
+                "A production system's use of \"{topic}\" creates competing consistency and availability risks. Which analysis best guides the architectural response?",
+                "Which failure mode of \"{topic}\" is most consequential at scale, and what mitigation best limits its impact?",
+            ],
+        },
     }
 
     _SUB_TYPES_KNOWLEDGE = ["fundamentals", "understanding"]
@@ -588,7 +747,8 @@ class OfflineProvider:
         return (cut[: last + 1] if last > 80 else cut).strip() + " …"
 
     def generate(
-        self, job_role, focus, contexts, n, category=None, question_offset=0
+        self, job_role, focus, contexts, n, category=None, question_offset=0,
+        experience_requirement=None, difficulty_level=None,
     ) -> List[GeneratedQA]:
         if not contexts:
             default_sub = "fundamentals" if category == "knowledge" else "apply"
@@ -604,12 +764,7 @@ class OfflineProvider:
                     expected_time_seconds=30,
                 )
             ]
-        if category == "skill":
-            sub_types = self._SUB_TYPES_SKILL
-        elif category == "knowledge":
-            sub_types = self._SUB_TYPES_KNOWLEDGE
-        else:
-            sub_types = self._SUB_TYPES_KNOWLEDGE + self._SUB_TYPES_SKILL
+        sub_types = _balanced_subtype_plan(category, n)
 
         clean_focus = (focus or "").strip()
         is_custom_focus = bool(
@@ -628,7 +783,9 @@ class OfflineProvider:
 
             # Cycle through sub_types evenly based on category
             sub_type = sub_types[i % len(sub_types)]
-            templates = self._TEMPLATES[sub_type]
+            templates = self._DIFFICULTY_TEMPLATES.get(
+                difficulty_level, {}
+            ).get(sub_type, self._TEMPLATES[sub_type])
             tmpl = templates[(i // len(sub_types)) % len(templates)]
             lo, hi = self._TIME_RANGES[sub_type]
             exp_time = random.randint(lo, hi)

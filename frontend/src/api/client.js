@@ -107,12 +107,16 @@ function createMockClient() {
       await delay(150);
       return jobProfiles.map((p) => ({ ...p }));
     },
-    async createJobProfile({ name }) {
+    async createJobProfile({ name, jobDescriptionFile }) {
       await delay(250);
       const profile = {
         id: uid("jp"),
         name: name.trim(),
         createdAt: new Date().toISOString(),
+        skills: [],
+        experienceRequirement: null,
+        difficultyLevel: null,
+        jobDescriptionName: jobDescriptionFile?.name || null,
       };
       jobProfiles = [profile, ...jobProfiles];
       return { ...profile };
@@ -511,9 +515,10 @@ function synthesizeQASet({
 function createHttpClient() {
   async function req(path, options = {}) {
     const token = tokenStore.get();
+    const isFormData = options.body instanceof FormData;
     const res = await fetch(`${BASE_URL}${path}`, {
       headers: {
-        "Content-Type": "application/json",
+        ...(!isFormData ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
       },
@@ -554,12 +559,21 @@ function createHttpClient() {
 
     // job profiles
     listJobProfiles: () => req("/api/job-profiles").catch(() => mockJobProfiles),
-    createJobProfile: (data) =>
-      req("/api/job-profiles", { method: "POST", body: JSON.stringify(data) }).catch(() => ({
-        id: uid("jp"),
-        name: data.name,
-        createdAt: new Date().toISOString(),
-      })),
+    createJobProfile: (data) => {
+      if (data.jobDescriptionFile) {
+        const form = new FormData();
+        form.append("name", data.name);
+        form.append("job_description", data.jobDescriptionFile);
+        return req("/api/job-profiles/with-description", {
+          method: "POST",
+          body: form,
+        });
+      }
+      return req("/api/job-profiles", {
+        method: "POST",
+        body: JSON.stringify({ name: data.name }),
+      });
+    },
     deleteJobProfile: (id) => req(`/api/job-profiles/${id}`, { method: "DELETE" }).catch(() => ({ ok: true })),
 
     // documents (per profile)

@@ -19,14 +19,13 @@ import { Card, Button, TypeBadge, UnanswerablePill, StatusBadge } from "../compo
 import QuestionCard from "../components/QuestionCard.jsx";
 import { formatBytes } from "../lib/format.js";
 
-const PROMPT_SUGGESTIONS = [
-  { label: "Deployment & CI/CD", text: "Focus on automated CI/CD rollbacks, zero-downtime deployment, and canary testing." },
-  { label: "RBAC & Security", text: "Emphasize multi-tenant isolation, RBAC policy enforcement, and secret rotation standards." },
-  { label: "Data Pipelines", text: "Target distributed message queues, Kafka lag mitigation, and nightly ETL batch recovery." },
-  { label: "System Scalability", text: "Focus on horizontal scaling, caching topologies, and microservice SLA metrics." },
-];
-
 const ACCEPTED_DOCS = ".pdf,.docx,.txt,.pptx,.md,.png,.jpg,.jpeg,.tiff,.tif,.bmp";
+const ACCEPTED_JOB_DESCRIPTION = ".pdf,application/pdf";
+const EXPERIENCE_DIFFICULTY_LABELS = {
+  beginner: "Foundational (0-2 years)",
+  intermediate: "Intermediate (3-5 years)",
+  advanced: "Advanced (6+ years)",
+};
 
 export default function Generate() {
   const { jobProfiles, generateQA, generateState, setGenerateState, createJobProfileQuick, uploadDocument } = useApp();
@@ -57,7 +56,9 @@ export default function Generate() {
   const [newRoleName, setNewRoleName] = useState("");
   const [creatingRole, setCreatingRole] = useState(false);
   const [newRoleFiles, setNewRoleFiles] = useState([]);
+  const [newRoleJobDescription, setNewRoleJobDescription] = useState(null);
   const [newRoleDragging, setNewRoleDragging] = useState(false);
+  const jobDescriptionInputRef = useRef(null);
 
   // Documents for selected profile
   const [profileDocs, setProfileDocs] = useState([]);
@@ -108,12 +109,9 @@ export default function Generate() {
     const q = roleSearch.toLowerCase();
     return jobProfiles.filter((p) => p.name.toLowerCase().includes(q));
   }, [jobProfiles, roleSearch]);
+  const selectedProfile = jobProfiles.find((profile) => profile.id === selectedProfileId);
 
-  // 2. Prompt (per-profile, persisted)
-  const profilePrompts = generateState?.profilePrompts || {};
-  const [prompt, setPrompt] = useState(profilePrompts[selectedProfileId] || generateState?.prompt || "");
-
-  // 3. Selected docs (defaults to all indexed for the active profile)
+  // 2. Selected docs (defaults to all indexed for the active profile)
   const [selectedDocs, setSelectedDocs] = useState(generateState?.selectedDocs || []);
 
   // Tracks which profile the current selection belongs to, and whether the user
@@ -153,10 +151,10 @@ export default function Generate() {
     });
   }, [selectedProfileId, indexedDocs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 4. Question type (persisted)
+  // 3. Question type (persisted)
   const [questionType, setQuestionType] = useState(generateState?.questionType || "both");
 
-  // 5. Number of questions (persisted)
+  // 4. Number of questions (persisted)
   const [questionCount, setQuestionCount] = useState(generateState?.questionCount || 6);
 
   // Generation state (not persisted — always fresh)
@@ -166,31 +164,20 @@ export default function Generate() {
 
   // Persist form state on every change
   useEffect(() => {
-    setGenerateState((prev) => ({
-      ...(prev || {}),
-      selectedProfileId,
-      selectedRole,
-      profilePrompts: {
-        ...(prev?.profilePrompts || {}),
-        [selectedProfileId]: prompt,
-      },
-      selectedDocs,
-      questionType,
-      questionCount,
-    }));
-  }, [selectedProfileId, selectedRole, prompt, selectedDocs, questionType, questionCount]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When profile changes, load the saved prompt for that profile
-  const prevProfileRef = useMemo(() => ({ current: selectedProfileId }), []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const savedPrompt = generateState?.profilePrompts?.[selectedProfileId];
-    if (savedPrompt !== undefined && savedPrompt !== prompt) {
-      setPrompt(savedPrompt);
-    } else if (!savedPrompt && selectedProfileId) {
-      // New profile with no saved prompt — start empty
-      setPrompt("");
-    }
-  }, [selectedProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
+    setGenerateState((prev) => {
+      const next = { ...(prev || {}) };
+      delete next.prompt;
+      delete next.profilePrompts;
+      return {
+        ...next,
+        selectedProfileId,
+        selectedRole,
+        selectedDocs,
+        questionType,
+        questionCount,
+      };
+    });
+  }, [selectedProfileId, selectedRole, selectedDocs, questionType, questionCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleDoc(id) {
     selScopeRef.current.touched = true;
@@ -215,7 +202,10 @@ export default function Generate() {
     if (!newRoleName.trim()) return;
     setCreatingRole(true);
     try {
-      const profile = await createJobProfileQuick({ name: newRoleName.trim() });
+      const profile = await createJobProfileQuick({
+        name: newRoleName.trim(),
+        jobDescriptionFile: newRoleJobDescription || undefined,
+      });
       // Upload any files
       for (const file of newRoleFiles) {
         await uploadDocument(profile.id, file);
@@ -224,7 +214,10 @@ export default function Generate() {
       setSelectedRole(profile.name);
       setNewRoleName("");
       setNewRoleFiles([]);
+      setNewRoleJobDescription(null);
       setShowCreateRole(false);
+    } catch (e) {
+      setError(e.message || "Could not create the job profile.");
     } finally {
       setCreatingRole(false);
     }
@@ -246,13 +239,8 @@ export default function Generate() {
     setResult(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
     try {
-      const finalPrompt =
-        prompt.trim() ||
-        `Generate interview questions for ${selectedRole} grounded in enterprise documentation.`;
-
       const set = await generateQA({
         jobRole: selectedRole.trim(),
-        prompt: finalPrompt,
         topK: questionCount,
         numQuestions: questionCount,
         documentIds: docIds,
@@ -355,51 +343,52 @@ export default function Generate() {
                   />
                   <button
                     type="button"
-                    onClick={() => setShowCreateRole(true)}
+                    onClick={() => {
+                      setError("");
+                      setShowCreateRole(true);
+                    }}
                     className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand-400 hover:text-brand-600 transition-colors shrink-0 cursor-pointer"
                     title="Create new job profile with documents"
                   >
                     <Plus size={13} /> New
                   </button>
                 </div>
+                {selectedProfile && (
+                  <div className="rounded-lg bg-slate-50 p-3 text-[11px] text-slate-600">
+                    {selectedProfile.skills?.length > 0 ? (
+                      <p>
+                        <span className="font-semibold text-slate-700">Extracted skills: </span>
+                        {selectedProfile.skills.join(", ")}
+                      </p>
+                    ) : (
+                      <p>
+                        {selectedProfile.jobDescriptionName
+                          ? "Job description was uploaded; extraction is available in backend mode."
+                          : "No job description uploaded; questions will use the role and selected documents."}
+                      </p>
+                    )}
+                    <p className="mt-1">
+                      <span className="font-semibold text-slate-700">Experience required: </span>
+                      {selectedProfile.experienceRequirement || "Not mentioned"}
+                    </p>
+                    <p className="mt-1">
+                      <span className="font-semibold text-slate-700">Question difficulty: </span>
+                      {EXPERIENCE_DIFFICULTY_LABELS[selectedProfile.difficultyLevel] ||
+                        (selectedProfile.experienceRequirement
+                          ? "Standard"
+                          : "Standard (experience not mentioned)")}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* STEP 2: Prompt */}
-            <div className="border-t border-slate-100 pt-4">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                  2
-                </span>
-                Prompt
-              </label>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                rows={2}
-                placeholder="Specific focus topics..."
-                className="mt-1.5 w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-xs outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-              />
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {PROMPT_SUGGESTIONS.map((s, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setPrompt(s.text)}
-                    className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-brand-50 hover:text-brand-700 transition"
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* STEP 3: Documents (auto-loaded from profile) */}
+            {/* STEP 2: Documents (auto-loaded from profile) */}
             <div className="border-t border-slate-100 pt-4">
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                    3
+                    2
                   </span>
                   Documents <span className="text-red-500">*</span>
                   {selectedDocs.length > 0 && (
@@ -476,11 +465,11 @@ export default function Generate() {
               )}
             </div>
 
-            {/* STEP 4: Question Type */}
+            {/* STEP 3: Question Type */}
             <div className="border-t border-slate-100 pt-4">
               <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                  4
+                  3
                 </span>
                 Question Type
               </label>
@@ -507,11 +496,11 @@ export default function Generate() {
               </div>
             </div>
 
-            {/* STEP 5: Number of Questions (slider only) */}
+            {/* STEP 4: Number of Questions (slider only) */}
             <div className="border-t border-slate-100 pt-4">
               <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-700">
-                  5
+                  4
                 </span>
                 Number of Questions
               </label>
@@ -602,7 +591,13 @@ export default function Generate() {
                 </div>
               </div>
               <button
-                onClick={() => { setShowCreateRole(false); setNewRoleName(""); setNewRoleFiles([]); }}
+                onClick={() => {
+                  setShowCreateRole(false);
+                  setNewRoleName("");
+                  setNewRoleFiles([]);
+                  setNewRoleJobDescription(null);
+                  setError("");
+                }}
                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
               >
                 <X size={16} />
@@ -623,6 +618,53 @@ export default function Generate() {
                   onChange={(e) => setNewRoleName(e.target.value)}
                   className="mt-1.5 w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Job Description <span className="text-slate-400 font-normal">(optional PDF)</span>
+                </label>
+                <input
+                  ref={jobDescriptionInputRef}
+                  type="file"
+                  accept={ACCEPTED_JOB_DESCRIPTION}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file && !file.name.toLowerCase().endsWith(".pdf")) {
+                      setError("Job descriptions must be PDF files.");
+                    } else {
+                      setError("");
+                      setNewRoleJobDescription(file || null);
+                    }
+                    e.target.value = "";
+                  }}
+                />
+                <div className="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => jobDescriptionInputRef.current?.click()}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs text-slate-600"
+                  >
+                    <Upload size={14} className="shrink-0 text-slate-400" />
+                    <span className="truncate">
+                      {newRoleJobDescription?.name || "Upload PDF to extract skills and experience"}
+                    </span>
+                  </button>
+                  {newRoleJobDescription && (
+                    <button
+                      type="button"
+                      aria-label="Remove job description"
+                      onClick={() => {
+                        setNewRoleJobDescription(null);
+                        setError("");
+                      }}
+                      className="rounded p-1 text-slate-400 hover:text-red-500"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Optional file upload */}
@@ -667,11 +709,23 @@ export default function Generate() {
                 )}
               </div>
 
+              {error && (
+                <p role="alert" className="text-xs font-semibold text-red-600">
+                  {error}
+                </p>
+              )}
+
               <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
-                <Button type="button" variant="secondary" size="sm" onClick={() => { setShowCreateRole(false); setNewRoleName(""); setNewRoleFiles([]); }}>
+                <Button type="button" variant="secondary" size="sm" onClick={() => {
+                  setShowCreateRole(false);
+                  setNewRoleName("");
+                  setNewRoleFiles([]);
+                  setNewRoleJobDescription(null);
+                  setError("");
+                }}>
                   Cancel
                 </Button>
-                <Button type="submit" size="sm" disabled={creatingRole}>
+                <Button type="submit" size="sm" disabled={creatingRole || Boolean(error)}>
                   {creatingRole ? "Creating..." : newRoleFiles.length > 0 ? "Create & Upload" : "Create Profile"}
                 </Button>
               </div>

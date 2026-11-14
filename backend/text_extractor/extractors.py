@@ -226,6 +226,14 @@ class PdfExtractor(BaseExtractor):
                     parts.append(page_text)
             if parts:
                 return "\n".join(parts)
+            for page_number, page in enumerate(doc):
+                if page_number >= 20:
+                    break
+                page_text = self._ocr_page(page)
+                if page_text.strip():
+                    parts.append(page_text)
+            if parts:
+                return "\n".join(parts)
         except Exception:
             pass
 

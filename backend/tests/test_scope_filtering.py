@@ -92,9 +92,13 @@ class ScopeFilteringTests(unittest.TestCase):
         )
 
         def embed_texts(texts):
-            if texts == ["Linked lists store nodes connected by references."]:
-                return np.array([[1.0, 0.0]], dtype=np.float32)
-            return np.array([[0.0, 1.0]], dtype=np.float32)
+            vectors = []
+            for text in texts:
+                if text == "A list of unrelated cooking recipes.":
+                    vectors.append([0.0, 1.0])
+                else:
+                    vectors.append([1.0, 0.0])
+            return np.array(vectors, dtype=np.float32)
 
         with (
             patch.object(pipeline_module, "get_generator") as get_generator,
@@ -106,6 +110,101 @@ class ScopeFilteringTests(unittest.TestCase):
             )
 
         self.assertEqual(questions, [])
+
+    def test_evidence_must_match_question_as_well_as_answer(self):
+        context = RetrievedChunk(
+            doc_id="data-structures",
+            doc_name="data-structures.pdf",
+            chunk_id=0,
+            text="Linked lists store nodes connected by references.",
+            score=0.9,
+        )
+        generated = SimpleNamespace(
+            question="How are database transactions isolated?",
+            answer="Nodes connected by references.",
+            answerable=True,
+            options=["Nodes connected by references.", "B", "C", "D"],
+            correct_option=0,
+            explanation="Unrelated to the question.",
+            sub_type="fundamentals",
+        )
+
+        def embed_texts(texts):
+            vectors = []
+            for text in texts:
+                if (
+                    text == context.text
+                    or text == generated.answer
+                    or "Linked lists store nodes" in text
+                    or "linked list nodes" in text.lower()
+                ):
+                    vectors.append([1.0, 0.0])
+                else:
+                    vectors.append([0.0, 1.0])
+            return np.array(vectors, dtype=np.float32)
+
+        with (
+            patch.object(pipeline_module, "classify_question", return_value=SimpleNamespace(type="knowledge")),
+            patch.object(pipeline_module, "embed_texts", side_effect=embed_texts),
+        ):
+            question = self.pipeline._make_question(
+                1,
+                generated,
+                [context],
+                np.array([[1.0, 0.0]], dtype=np.float32),
+            )
+
+        self.assertFalse(question.answerable)
+        self.assertEqual(question.sources, [])
+
+    def test_evidence_snippet_uses_relevant_part_of_chunk(self):
+        context = RetrievedChunk(
+            doc_id="data-structures",
+            doc_name="data-structures.pdf",
+            chunk_id=0,
+            text=(
+                "The chapter introduces several data structures. "
+                "Linked lists store nodes connected by references."
+            ),
+            score=0.9,
+        )
+        generated = SimpleNamespace(
+            question="How are linked list nodes connected?",
+            answer="Nodes are connected by references.",
+            answerable=True,
+            options=["Nodes are connected by references.", "B", "C", "D"],
+            correct_option=0,
+            explanation="The passage explains the node links.",
+            sub_type="fundamentals",
+        )
+
+        def embed_texts(texts):
+            vectors = []
+            for text in texts:
+                if (
+                    "Linked lists store nodes" in text
+                    or "linked list nodes" in text.lower()
+                    or text == generated.answer
+                ):
+                    vectors.append([1.0, 0.0])
+                else:
+                    vectors.append([0.0, 1.0])
+            return np.array(vectors, dtype=np.float32)
+
+        with (
+            patch.object(pipeline_module, "classify_question", return_value=SimpleNamespace(type="knowledge")),
+            patch.object(pipeline_module, "embed_texts", side_effect=embed_texts),
+        ):
+            question = self.pipeline._make_question(
+                1,
+                generated,
+                [context],
+                np.array([[1.0, 0.0]], dtype=np.float32),
+            )
+
+        self.assertTrue(question.answerable)
+        self.assertIn("Linked lists store nodes connected by references.", question.sources[0].snippet)
+        self.assertNotIn("The chapter introduces", question.sources[0].snippet)
 
     def test_model_marked_unanswerable_question_is_excluded(self):
         self.pipeline.retriever = FakeRetriever(
@@ -128,14 +227,20 @@ class ScopeFilteringTests(unittest.TestCase):
             explanation="The model marked this question unanswerable.",
             sub_type="fundamentals",
         )
-        matching_embeddings = np.array([[1.0, 0.0]], dtype=np.float32)
+        def matching_embeddings(texts):
+            return np.array([[1.0, 0.0] for _ in texts], dtype=np.float32)
 
         with (
             patch.object(pipeline_module, "get_generator") as get_generator,
             patch.object(
                 pipeline_module,
+                "classify_question",
+                return_value=SimpleNamespace(type="knowledge"),
+            ),
+            patch.object(
+                pipeline_module,
                 "embed_texts",
-                return_value=matching_embeddings,
+                side_effect=matching_embeddings,
             ),
         ):
             get_generator.return_value.generate.return_value = [generated]

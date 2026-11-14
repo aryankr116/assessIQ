@@ -12,6 +12,7 @@ chunking stages, then layers embedding/retrieval/generation/classification on to
 from __future__ import annotations
 
 import random
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -178,23 +179,79 @@ class RagPipeline:
         # Fall back to an evenly alternating valid sub-type.
         return allowed[(idx - 1) % len(allowed)]
 
+    @staticmethod
+    def _balance_subtypes(questions):
+        counts = {"knowledge": 0, "skill": 0}
+        subtype_groups = {
+            "knowledge": ("fundamentals", "understanding"),
+            "skill": ("apply", "analyse"),
+        }
+        time_ranges = {
+            "fundamentals": (20, 40),
+            "understanding": (45, 75),
+            "apply": (60, 100),
+            "analyse": (75, 120),
+        }
+        for question in questions:
+            group = subtype_groups.get(question.type)
+            if not group:
+                continue
+            subtype = group[counts[question.type] % len(group)]
+            counts[question.type] += 1
+            question.sub_type = subtype
+            lo, hi = time_ranges[subtype]
+            question.expected_time_seconds = random.randint(lo, hi)
+        return questions
+
+    @staticmethod
+    def _evidence_snippet(text, question_vec, answer_vec):
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+        if not sentences:
+            sentences = [text.strip()]
+        windows = sentences + [
+            f"{sentences[i]} {sentences[i + 1]}"
+            for i in range(len(sentences) - 1)
+        ]
+        vectors = embed_texts(windows)
+        question_scores = vectors @ question_vec
+        answer_scores = vectors @ answer_vec
+        best = int(np.argmax(np.minimum(question_scores, answer_scores)))
+        snippet = windows[best].replace("\n", " ")
+        return snippet[:160].rstrip() + (" …" if len(snippet) > 160 else "")
+
     def _make_question(self, idx, qa, contexts, ctx_vecs, force_type=None) -> Question:
         cls = classify_question(qa.question)
         q_type = force_type or cls.type
+        options = getattr(qa, "options", []) or [
+            "Option A", "Option B", "Option C", "Option D"
+        ]
+        correct_option = getattr(qa, "correct_option", 0)
+        if not isinstance(correct_option, int) or not 0 <= correct_option < len(options):
+            correct_option = 0
+        correct_answer = options[correct_option]
+        explanation = getattr(qa, "answer", "") or getattr(qa, "explanation", "")
 
         source = None
         grounding = 0.0
         is_grounded = False
         if len(ctx_vecs):
-            ans_vec = embed_texts([qa.answer or qa.question])[0]
-            sims = ctx_vecs @ ans_vec
-            best = int(np.argmax(sims))
-            grounding = float(sims[best])
+            question_vec, correct_answer_vec, explanation_vec = embed_texts(
+                [qa.question, correct_answer, explanation or correct_answer]
+            )
+            question_sims = ctx_vecs @ question_vec
+            correct_answer_sims = ctx_vecs @ correct_answer_vec
+            explanation_sims = ctx_vecs @ explanation_vec
+            # Evidence must support the question, selected answer, and rationale.
+            joint_sims = np.minimum(
+                np.minimum(question_sims, correct_answer_sims), explanation_sims
+            )
+            best = int(np.argmax(joint_sims))
+            grounding = float(joint_sims[best])
             if grounding >= settings.answerability_threshold:
                 c = contexts[best]
-                snippet = c.text.strip().replace("\n", " ")
-                if len(snippet) > 160:
-                    snippet = snippet[:160].rstrip() + " …"
+                snippet = self._evidence_snippet(
+                    c.text, question_vec, correct_answer_vec
+                )
                 source = Source(
                     doc_id=c.doc_id, doc_name=c.doc_name, chunk_id=c.chunk_id, snippet=snippet
                 )
@@ -212,19 +269,22 @@ class RagPipeline:
         return Question(
             id=f"q{idx}",
             question=qa.question,
-            answer=qa.answer,
+            answer=explanation,
             type=q_type,
             confidence=confidence,
             answerable=answerable,
             sources=[source] if (source and is_grounded) else [],
             sub_type=sub_type,
-            options=getattr(qa, "options", []) or ["Option A", "Option B", "Option C", "Option D"],
-            correct_option=getattr(qa, "correct_option", 0),
+            options=options,
+            correct_option=correct_option,
             explanation=getattr(qa, "explanation", ""),
             expected_time_seconds=random.randint(lo, hi),
         )
 
-    def _generate_round(self, job_role, prompt, top_k, document_ids, n, category, start_idx):
+    def _generate_round(
+        self, job_role, prompt, top_k, document_ids, n, category, start_idx,
+        experience_requirement=None, difficulty_level=None,
+    ):
         """One retrieval+generation round. Returns (questions, best_score)."""
         hint = self._CATEGORY_QUERY_HINT.get(category or "", "")
         clean_prompt = (prompt or "").strip()
@@ -247,7 +307,14 @@ class RagPipeline:
 
         generator = get_generator()
         raw_qas = generator.generate(
-            job_role, prompt, contexts, n, category, question_offset=start_idx - 1
+            job_role,
+            prompt,
+            contexts,
+            n,
+            category,
+            question_offset=start_idx - 1,
+            experience_requirement=experience_requirement,
+            difficulty_level=difficulty_level,
         )
         ctx_vecs = embed_texts([c.text for c in contexts])
 
@@ -267,6 +334,8 @@ class RagPipeline:
         two_round: bool = False,
         num_questions: Optional[int] = None,
         question_type: Optional[str] = None,
+        experience_requirement: Optional[str] = None,
+        difficulty_level: Optional[str] = None,
     ) -> QAResult:
         used_docs = document_ids or [r.doc_id for r in self.store.records]
         used_docs = list(dict.fromkeys(used_docs))
@@ -279,6 +348,7 @@ class RagPipeline:
             q_type = "both" if two_round else "mixed"
 
         def _finish(questions, best):
+            self._balance_subtypes(questions)
             for i, q in enumerate(questions, start=1):
                 q.id = f"q{i}"
             return QAResult(job_role, prompt, top_k, used_docs, questions)
@@ -286,11 +356,13 @@ class RagPipeline:
         # Single-category rounds (user explicitly asked for one type).
         if q_type in ("knowledge", "skill"):
             qs, best = self._generate_round(
-                job_role, prompt, top_k, document_ids, total, q_type, 1
+                job_role, prompt, top_k, document_ids, total, q_type, 1,
+                experience_requirement, difficulty_level,
             )
             if len(qs) < total:
                 extra_qs, _ = self._generate_round(
-                    job_role, prompt, top_k, document_ids, total - len(qs), q_type, len(qs) + 1
+                    job_role, prompt, top_k, document_ids, total - len(qs), q_type, len(qs) + 1,
+                    experience_requirement, difficulty_level,
                 )
                 qs.extend(extra_qs)
             return _finish(qs[:total], best)
@@ -300,27 +372,60 @@ class RagPipeline:
             n_know = (total + 1) // 2
             n_skill = total - n_know
             k_qs, k_best = self._generate_round(
-                job_role, prompt, top_k, document_ids, n_know, "knowledge", 1
+                job_role, prompt, top_k, document_ids, n_know, "knowledge", 1,
+                experience_requirement, difficulty_level,
             )
-            s_qs, s_best = self._generate_round(
-                job_role, prompt, top_k, document_ids, n_skill, "skill", len(k_qs) + 1
-            )
-            combined = k_qs + s_qs
-            if len(combined) < total:
-                missing = total - len(combined)
-                extra_qs, _ = self._generate_round(
-                    job_role, prompt, top_k, document_ids, missing, None, len(combined) + 1
+            s_qs, s_best = ([], 0.0)
+            if n_skill:
+                s_qs, s_best = self._generate_round(
+                    job_role, prompt, top_k, document_ids, n_skill, "skill", len(k_qs) + 1,
+                    experience_requirement, difficulty_level,
                 )
-                combined.extend(extra_qs)
-            return _finish(combined[:total], max(k_best, s_best))
+
+            for category, target in (("knowledge", n_know), ("skill", n_skill)):
+                questions = k_qs if category == "knowledge" else s_qs
+                attempts = 0
+                while len(questions) < target and attempts < 2:
+                    attempts += 1
+                    extra, score = self._generate_round(
+                        job_role,
+                        prompt,
+                        top_k,
+                        document_ids,
+                        target - len(questions),
+                        category,
+                        len(k_qs) + len(s_qs) + 1,
+                        experience_requirement,
+                        difficulty_level,
+                    )
+                    if category == "knowledge":
+                        k_best = max(k_best, score)
+                    else:
+                        s_best = max(s_best, score)
+                    if not extra:
+                        break
+                    questions.extend(extra)
+
+            # Keep the requested split even if one category could not produce
+            # its full quota; never fill a missing category with mixed questions.
+            if not k_qs or not s_qs:
+                return _finish([], max(k_best, s_best))
+            pairs = min(len(k_qs), len(s_qs), total // 2)
+            knowledge_count = pairs
+            if total % 2 and len(k_qs) > pairs:
+                knowledge_count += 1
+            combined = k_qs[:knowledge_count] + s_qs[:pairs]
+            return _finish(combined, max(k_best, s_best))
 
         # Mixed single round (no explicit type requested).
         questions, best = self._generate_round(
-            job_role, prompt, top_k, document_ids, total, None, 1
+            job_role, prompt, top_k, document_ids, total, None, 1,
+            experience_requirement, difficulty_level,
         )
         if len(questions) < total:
             extra_qs, _ = self._generate_round(
-                job_role, prompt, top_k, document_ids, total - len(questions), None, len(questions) + 1
+                job_role, prompt, top_k, document_ids, total - len(questions), None, len(questions) + 1,
+                experience_requirement, difficulty_level,
             )
             questions.extend(extra_qs)
         return _finish(questions[:total], best)

@@ -1,13 +1,13 @@
 # AssessIQ — Backend
 
-Python backend for **AssessIQ** (*Intelligent System for Job-Specific QA Generation*). It ingests enterprise documents, indexes them for semantic retrieval, and runs a **Retrieval-Augmented Generation (RAG)** pipeline that produces interview question–answer pairs grounded only in those documents — each auto-classified **Knowledge-Based** or **Skill-Based**, with out-of-scope prompts rejected rather than hallucinated.
+Python backend for **AssessIQ** (*Intelligent System for Job-Specific QA Generation*). It ingests enterprise documents, indexes them for semantic retrieval, and runs a **Retrieval-Augmented Generation (RAG)** pipeline that produces interview Q&A grounded only in those documents, classifies questions as Knowledge-Based or Skill-Based, and rejects out-of-scope requests.
 
 It extends the original repo's ingestion code (`text_extractor/` + `ingest.py`) with the embedding, retrieval, generation, classification, and API layers, and serves the exact REST contract the React frontend expects.
 
 ## Architecture
 
 ```
-                upload                          prompt
+                upload                     job description
                   │                               │
           ┌───────▼────────┐              ┌───────▼────────┐
           │ text_extractor │              │   Retriever    │  top-k dense search
@@ -38,6 +38,7 @@ It extends the original repo's ingestion code (`text_extractor/` + `ingest.py`) 
 | `rag/vector_store.py` | FAISS `IndexFlatIP` with numpy-cosine fallback + persistence |
 | `rag/retriever.py` | top-k dense passage retrieval |
 | `rag/generator.py` | pluggable LLM providers: OpenAI / Ollama / offline |
+| `rag/job_description.py` | extract job skills and experience requirements |
 | `rag/classifier.py` | Knowledge-vs-Skill via semantic similarity + lexical cues |
 | `rag/pipeline.py` | orchestration: ingest, and retrieve→generate→classify→ground |
 | `api/main.py` | FastAPI app — the six endpoints |
@@ -83,7 +84,9 @@ Then start the frontend with `VITE_API_MODE=real` (see `frontend/README.md`) and
 | `POST` | `/api/documents` | `multipart/form-data` field `file` | `Document` (ingested + indexed) |
 | `DELETE` | `/api/documents/{id}` | — | `204` |
 | `GET` | `/api/qa-sets` | — | `QASet[]` |
-| `POST` | `/api/generate` | `{ jobRole, prompt, topK, documentIds, twoRound }` | `QASet` |
+| `POST` | `/api/job-profiles` | `{ name }` | `JobProfile` |
+| `POST` | `/api/job-profiles/with-description` | multipart fields `name`, `job_description` (PDF) | `JobProfile` with extracted requirements |
+| `POST` | `/api/generate` | `{ jobRole, jobProfileId, topK, documentIds, twoRound }` | `QASet` |
 | `DELETE` | `/api/qa-sets/{id}` | — | `204` |
 | `PATCH` | `/api/qa-sets/{setId}/questions/{questionId}/rating` | `{ rating }` (`1`/`-1`/`null`) | `Question` |
 | `GET` | `/api/stats` | — | `Stats` |
@@ -103,6 +106,22 @@ Two roles — **recruiter** (default) and **admin**. Passwords are PBKDF2-hashed
 ### Two-round generation
 
 `POST /api/generate` with `"twoRound": true` runs the report's sequence-diagram flow: a **Knowledge** round and a **Skill** round, each with its *own* retrieval context, then combined. Default (`false`) is a single mixed round.
+
+### Job-description-driven generation
+
+Create a profile with `POST /api/job-profiles/with-description` using
+`multipart/form-data` fields `name` and `job_description` (PDF). The backend
+extracts readable text, recognizes skills, and detects an experience-in-years
+requirement. Only the extracted skills and experience metadata are retained on
+the profile; the uploaded job-description PDF is not added to the grounding
+document index. When `/api/generate` receives that profile's `jobProfileId`,
+its skills become the generation focus, and its experience requirement
+calibrates question difficulty. If the description has no experience
+requirement, the usual question difficulty is used. Profiles created without a
+description continue to use normal role-based generation.
+Experience requirements map to three levels: 0-2 years uses foundational
+questions, 3-5 years uses intermediate questions, and 6+ years uses advanced
+questions. Generate Q&A displays the extracted requirement or “Not mentioned.”
 
 ## LLM providers
 
