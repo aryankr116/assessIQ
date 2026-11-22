@@ -8,6 +8,7 @@ export default function Admin() {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
   const [params, setParams] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -20,6 +21,8 @@ export default function Admin() {
         setParams(p);
       } catch (e) {
         setError(e.message);
+      } finally {
+        setLoading(false);
       }
     })();
   }, []);
@@ -38,6 +41,22 @@ export default function Admin() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (loading) {
+    return (
+      <div role="status" aria-label="Loading admin settings" className="grid gap-6 lg:grid-cols-2">
+        {[0, 1].map((item) => (
+          <Card key={item} className="p-6" aria-hidden="true">
+            <div className="animate-pulse space-y-4">
+              <div className="h-4 w-1/2 rounded bg-slate-200" />
+              <div className="h-3 w-4/5 rounded bg-slate-100" />
+              <div className="h-24 rounded-xl bg-slate-100" />
+            </div>
+          </Card>
+        ))}
+      </div>
+    );
   }
 
   if (error) {
@@ -65,7 +84,7 @@ export default function Admin() {
           {users.map((u) => (
             <div key={u.username} className="flex items-center justify-between py-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-indigo-600 text-xs font-black uppercase text-white shadow-xs">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#D8B36E] text-xs font-bold uppercase text-[#211B17]">
                   {u.username.slice(0, 2)}
                 </div>
                 <div className="leading-tight">
@@ -73,7 +92,7 @@ export default function Admin() {
                     {u.username}
                   </span>
                   {u.username === user?.username && (
-                    <span className="ml-1.5 text-[10px] font-bold text-brand-600 bg-brand-50 px-1.5 py-0.2 rounded">
+                    <span className="ml-1.5 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-600">
                       YOU
                     </span>
                   )}
@@ -81,8 +100,8 @@ export default function Admin() {
               </div>
               <span
                 className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border uppercase tracking-wider ${u.role === "admin"
-                    ? "bg-purple-50 text-purple-700 border-purple-200"
-                    : "bg-blue-50 text-blue-700 border-blue-200"
+                    ? "bg-[#F8EAE4] text-[#893A2A] border-[#E4B7A8]"
+                    : "bg-[#F6EFDF] text-[#6E5424] border-[#D8B36E]"
                   }`}
               >
                 {u.role}
@@ -150,7 +169,7 @@ export default function Admin() {
                 Save Hyperparameters
               </Button>
               {saved && (
-                <span className="flex items-center gap-1 text-xs font-bold text-emerald-600">
+                <span className="flex items-center gap-1 text-xs font-bold text-sand-700">
                   <CheckCircle2 size={14} /> Saved successfully
                 </span>
               )}

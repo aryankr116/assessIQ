@@ -130,6 +130,16 @@ class JobProfile(CamelModel):
     experience_requirement: Optional[str] = None
     difficulty_level: Optional[str] = None
     job_description_name: Optional[str] = None
+    job_description_word_count: Optional[int] = None
+
+
+class JobDescriptionDetail(CamelModel):
+    name: str
+    text: str
+    word_count: Optional[int] = None
+    skills: List[str] = Field(default_factory=list)
+    experience_requirement: Optional[str] = None
+    difficulty_level: Optional[str] = None
 
 
 class JobProfileCreateRequest(CamelModel):

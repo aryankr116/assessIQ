@@ -11,8 +11,8 @@ const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
 
 function FeatureCard({ icon: Icon, title, description }) {
   return (
-    <div className="flex items-start gap-3.5 rounded-xl bg-white/60 backdrop-blur-sm p-4 border border-white/70">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+    <div className="flex items-start gap-3.5 border-b border-[#D8CCB9] py-3.5 last:border-0">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F8EAE4] text-brand-700">
         <Icon size={20} />
       </div>
       <div>
@@ -71,7 +71,7 @@ export default function Login() {
         window.google.accounts.id.renderButton(googleBtnRef.current, {
           theme: "outline",
           size: "large",
-          width: "100%",
+          width: Math.min(400, Math.max(200, googleBtnRef.current.clientWidth)),
           text: "signin_with",
           shape: "rectangular",
         });
@@ -125,24 +125,24 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen font-sans">
+    <div className="flex min-h-screen bg-[#F0E7D7] font-sans">
       {/* ── Left branding panel ── */}
-      <div className="relative hidden w-[55%] flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-50 via-white to-brand-50/30 px-12 py-10 lg:flex xl:px-16">
+      <div className="relative hidden w-[55%] flex-col justify-between overflow-hidden bg-[#F0E7D7] px-12 py-10 lg:flex xl:px-16">
         {/* Decorative wave SVGs */}
         <svg className="pointer-events-none absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 800 600">
           <defs>
             <linearGradient id="waveGrad1" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#99f6e4" stopOpacity="0.18" />
-              <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0.06" />
+              <stop offset="0%" stopColor="#D8B36E" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="#C45B3D" stopOpacity="0.06" />
             </linearGradient>
             <linearGradient id="waveGrad2" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#5eead4" stopOpacity="0.12" />
-              <stop offset="100%" stopColor="#0d9488" stopOpacity="0.04" />
+              <stop offset="0%" stopColor="#C45B3D" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="#D8B36E" stopOpacity="0.04" />
             </linearGradient>
           </defs>
           <path d="M-50 600 Q200 500 300 350 Q400 200 500 280 Q600 360 750 200 L850 0 L850 600 Z" fill="url(#waveGrad1)" />
           <path d="M-50 600 Q100 480 250 400 Q400 320 550 350 Q700 380 850 250 L850 600 Z" fill="url(#waveGrad2)" />
-          <path d="M600 600 Q650 500 700 420 Q750 340 800 300 L850 280 L850 600 Z" fill="#ccfbf1" fillOpacity="0.10" />
+          <path d="M600 600 Q650 500 700 420 Q750 340 800 300 L850 280 L850 600 Z" fill="#D8B36E" fillOpacity="0.10" />
         </svg>
 
         <div className="relative z-10">
@@ -151,10 +151,10 @@ export default function Login() {
 
         <div className="relative z-10 max-w-lg space-y-10">
           <div>
-            <h1 className="text-4xl font-black leading-tight text-slate-900 font-display xl:text-5xl">
+            <h1 className="font-display text-4xl font-semibold leading-[1.05] tracking-[-0.025em] text-slate-900 xl:text-5xl">
               Smarter Interviews.
               <br />
-              <span className="bg-gradient-to-r from-brand-600 to-teal-500 bg-clip-text text-transparent">
+              <span className="text-brand-700">
                 Better Hires.
               </span>
             </h1>
@@ -186,31 +186,31 @@ export default function Login() {
       </div>
 
       {/* ── Right form panel ── */}
-      <div className="relative flex w-full flex-col items-center justify-center bg-gradient-to-br from-brand-900 via-brand-800 to-teal-900 px-6 py-10 lg:w-[45%] xl:px-12">
+      <div className="relative flex w-full flex-col items-center justify-center overflow-hidden bg-[#171411] px-6 py-10 lg:w-[45%] xl:px-12">
         {/* Decorative wave SVGs */}
         <svg className="pointer-events-none absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 500 800">
           <defs>
             <linearGradient id="rWaveGrad1" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#5eead4" stopOpacity="0.08" />
-              <stop offset="100%" stopColor="#99f6e4" stopOpacity="0.03" />
+              <stop offset="0%" stopColor="#D8B36E" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="#C45B3D" stopOpacity="0.04" />
             </linearGradient>
           </defs>
           <path d="M-50 0 Q100 200 50 400 Q0 600 150 800 L-50 800 Z" fill="url(#rWaveGrad1)" />
-          <path d="M50 0 Q150 150 100 350 Q50 550 200 800 L500 800 L500 0 Z" fill="#134e4a" fillOpacity="0.12" />
-          <path d="M250 0 Q350 200 300 400 Q250 600 400 800 L500 800 L500 0 Z" fill="#115e59" fillOpacity="0.08" />
+          <path d="M50 0 Q150 150 100 350 Q50 550 200 800 L500 800 L500 0 Z" fill="#C45B3D" fillOpacity="0.08" />
+          <path d="M250 0 Q350 200 300 400 Q250 600 400 800 L500 800 L500 0 Z" fill="#D8B36E" fillOpacity="0.06" />
         </svg>
 
         {/* Mobile brand header (hidden on desktop) */}
-        <div className="relative z-10 mb-8 flex flex-col items-center text-center text-white lg:hidden">
-          <LogoMark className="h-20 w-20 mix-blend-screen" />
-          <h1 className="mt-4 text-3xl font-black tracking-tight font-display">
-            assess<span className="text-teal-300">IQ</span>
+        <div className="relative z-10 mb-8 flex flex-col items-center text-center text-[#FBF8F1] lg:hidden">
+          <LogoMark className="h-16 w-16" />
+          <h1 className="mt-4 font-display text-3xl font-semibold tracking-tight">
+            assess<span className="text-[#D8B36E]">IQ</span>
           </h1>
-          <p className="mt-1 text-xs font-semibold text-brand-200">Interview Intelligence</p>
+          <p className="mt-1 text-xs font-semibold text-[#D9CCBA]">Interview Intelligence</p>
         </div>
 
         {/* Form Card */}
-        <div className="relative z-10 w-full max-w-md animate-fade-in-up rounded-2xl bg-white p-8 shadow-elevated lg:p-9">
+        <div className="relative z-10 w-full max-w-md animate-fade-in-up rounded-2xl border border-[#E2D6C4] bg-[#FBF8F1] p-7 shadow-elevated lg:p-9">
           {/* Tabs */}
           <div className="flex border-b border-slate-200">
             {["login", "register"].map((m) => (
@@ -318,7 +318,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-brand-600 to-teal-600 py-3 text-sm font-bold text-white shadow-md transition-all hover:from-brand-700 hover:to-teal-700 hover:shadow-lg active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-600 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-700 hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
             >
               {busy ? (
                 <Loader2 size={18} className="animate-spin" />
@@ -378,15 +378,15 @@ export default function Login() {
         </div>
 
         {/* Footer */}
-        <p className="relative z-10 mt-6 flex items-center gap-1.5 text-xs text-brand-200/80 font-semibold">
-          <ShieldCheck size={14} className="text-brand-300" /> All data stays on your local host infrastructure
+        <p className="relative z-10 mt-6 flex items-center gap-1.5 text-xs font-semibold text-[#D9CCBA]">
+          <ShieldCheck size={14} className="text-[#D8B36E]" /> All data stays on your local host infrastructure
         </p>
       </div>
 
       {/* Forgot Password Modal */}
       {showForgot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-elevated animate-fade-in-up">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171411]/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-[#E2D6C4] bg-[#FBF8F1] p-6 shadow-elevated animate-fade-in-up">
             <div className="flex items-center justify-between pb-4">
               <h3 className="text-base font-bold text-slate-900 font-display">
                 {forgotStep === 1 ? "Reset Password" : "Check Your Email"}
@@ -448,7 +448,7 @@ export default function Login() {
             {/* Step 2: Success */}
             {forgotStep === 2 && (
               <div className="text-center py-2">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-sand-100 text-sand-700">
                   <ShieldCheck size={24} />
                 </div>
                 <p className="text-sm font-semibold text-slate-800">Check your inbox</p>

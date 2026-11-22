@@ -50,6 +50,7 @@ const uid = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).
 function createMockClient() {
   let documents = mockDocuments.map((d) => ({ ...d }));
   let jobProfiles = mockJobProfiles.map((p) => ({ ...p }));
+  const jobDescriptionTexts = new Map();
   let qaSets = mockQASets.map((s) => ({ ...s, questions: s.questions.map((q) => ({ ...q })) }));
   let users = mockUsers.map((u) => ({ ...u }));
   let params = { defaultTopK: 6, questionsPerSet: 6, answerabilityThreshold: 0.18 };
@@ -117,14 +118,68 @@ function createMockClient() {
         experienceRequirement: null,
         difficultyLevel: null,
         jobDescriptionName: jobDescriptionFile?.name || null,
+        jobDescriptionWordCount: null,
       };
       jobProfiles = [profile, ...jobProfiles];
+      if (jobDescriptionFile) jobDescriptionTexts.set(profile.id, "");
       return { ...profile };
+    },
+    async updateJobDescription(profileId, file) {
+      await delay(350);
+      const profile = jobProfiles.find((item) => item.id === profileId);
+      if (!profile) throw new Error("Job profile not found.");
+      const updatedProfile = {
+        ...profile,
+        jobDescriptionName: file.name,
+        jobDescriptionWordCount: null,
+      };
+      jobProfiles = jobProfiles.map((item) =>
+        item.id === profileId ? updatedProfile : item
+      );
+      jobDescriptionTexts.set(profileId, "");
+      return { ...updatedProfile };
+    },
+    async getJobDescription(profileId) {
+      await delay(120);
+      const profile = jobProfiles.find((item) => item.id === profileId);
+      if (!profile?.jobDescriptionName) {
+        throw new Error("No job description is attached to this profile.");
+      }
+      return {
+        name: profile.jobDescriptionName,
+        text: jobDescriptionTexts.get(profileId) || "",
+        wordCount: profile.jobDescriptionWordCount || null,
+        skills: profile.skills || [],
+        experienceRequirement: profile.experienceRequirement || null,
+        difficultyLevel: profile.difficultyLevel || null,
+      };
+    },
+    async deleteJobDescription(profileId) {
+      await delay(150);
+      const profile = jobProfiles.find((item) => item.id === profileId);
+      if (!profile?.jobDescriptionName) {
+        throw new Error("No job description is attached to this profile.");
+      }
+      jobProfiles = jobProfiles.map((item) =>
+        item.id === profileId
+          ? {
+              ...item,
+              skills: [],
+              experienceRequirement: null,
+              difficultyLevel: null,
+              jobDescriptionName: null,
+              jobDescriptionWordCount: null,
+            }
+          : item
+      );
+      jobDescriptionTexts.delete(profileId);
+      return { ok: true };
     },
     async deleteJobProfile(id) {
       await delay(150);
       jobProfiles = jobProfiles.filter((p) => p.id !== id);
       documents = documents.filter((d) => d.jobProfileId !== id);
+      jobDescriptionTexts.delete(id);
       return { ok: true };
     },
 
@@ -574,6 +629,19 @@ function createHttpClient() {
         body: JSON.stringify({ name: data.name }),
       });
     },
+    updateJobDescription: (profileId, file) => {
+      const form = new FormData();
+      form.append("job_description", file);
+      return req(`/api/job-profiles/${profileId}/job-description`, {
+        method: "PUT",
+        body: form,
+      });
+    },
+    getJobDescription: (profileId) =>
+      req(`/api/job-profiles/${profileId}/job-description`),
+    deleteJobDescription: (profileId) =>
+      req(`/api/job-profiles/${profileId}/job-description`, { method: "DELETE" })
+        .then(() => ({ ok: true })),
     deleteJobProfile: (id) => req(`/api/job-profiles/${id}`, { method: "DELETE" }).catch(() => ({ ok: true })),
 
     // documents (per profile)

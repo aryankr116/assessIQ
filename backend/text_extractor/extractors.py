@@ -256,19 +256,7 @@ class PdfExtractor(BaseExtractor):
         except Exception:
             pass
 
-        # 4. Fallback text stream parser from binary content
-        try:
-            with open(path, "rb") as f:
-                content = f.read()
-            # Extract plain text characters from PDF stream
-            printable = "".join(chr(b) if 32 <= b <= 126 or b in (10, 13, 9) else " " for b in content)
-            words = [w for w in printable.split() if len(w) >= 3 and w.isalpha()]
-            if len(words) >= 5:
-                return " ".join(words[:400])
-        except Exception:
-            pass
-
-        return f"PDF Document {os.path.basename(path)} content extracted for RAG indexing."
+        return ""
 
 
 def file_metadata(path: str) -> dict:

@@ -24,6 +24,12 @@ export function AppProvider({ children }) {
   const [jobProfiles, setJobProfiles] = useState([]);
   const [qaSets, setQaSets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const retryWorkspaceLoad = useCallback(() => {
+    setReloadToken((token) => token + 1);
+  }, []);
 
   // Generate page state persistence
   const [generateState, setGenerateStateRaw] = useState(loadGenerateState);
@@ -35,7 +41,7 @@ export function AppProvider({ children }) {
       saveGenerateState(next);
       return next;
     });
-  }, []);
+  },   []);
 
   const refreshJobProfiles = useCallback(async () => {
     const profiles = await api.listJobProfiles();
@@ -53,19 +59,30 @@ export function AppProvider({ children }) {
     let active = true;
     (async () => {
       setLoading(true);
-      const [profiles, sets] = await Promise.all([
-        api.listJobProfiles(),
-        api.listQASets(),
-      ]);
-      if (!active) return;
-      setJobProfiles(profiles);
-      setQaSets(sets);
-      setLoading(false);
+      setLoadError("");
+      try {
+        const [profiles, sets] = await Promise.all([
+          api.listJobProfiles(),
+          api.listQASets(),
+        ]);
+        if (!active) return;
+        setJobProfiles(profiles);
+        setQaSets(sets);
+      } catch (error) {
+        if (!active) return;
+        setLoadError(
+          error instanceof Error && error.message
+            ? error.message
+            : "Unable to load workspace data."
+        );
+      } finally {
+        if (active) setLoading(false);
+      }
     })();
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadToken]);
 
   const createJobProfile = useCallback(
     async (data) => {
@@ -108,6 +125,30 @@ export function AppProvider({ children }) {
     []
   );
 
+  const updateJobDescription = useCallback(
+    async (profileId, file) => {
+      const profile = await api.updateJobDescription(profileId, file);
+      setJobProfiles((profiles) =>
+        profiles.map((item) => (item.id === profileId ? profile : item))
+      );
+      return profile;
+    },
+    []
+  );
+
+  const getJobDescription = useCallback(
+    async (profileId) => api.getJobDescription(profileId),
+    []
+  );
+
+  const deleteJobDescription = useCallback(
+    async (profileId) => {
+      await api.deleteJobDescription(profileId);
+      await refreshJobProfiles();
+    },
+    [refreshJobProfiles]
+  );
+
   const generateQA = useCallback(
     async (payload) => {
       const set = await api.generateQA(payload);
@@ -148,6 +189,8 @@ export function AppProvider({ children }) {
     jobProfiles,
     qaSets,
     loading,
+    loadError,
+    retryWorkspaceLoad,
     refreshJobProfiles,
     refreshQaSets,
     createJobProfile,
@@ -155,6 +198,9 @@ export function AppProvider({ children }) {
     deleteJobProfile,
     uploadDocument,
     deleteDocument,
+    updateJobDescription,
+    getJobDescription,
+    deleteJobDescription,
     generateQA,
     deleteQASet,
     rateQuestion,

@@ -27,6 +27,7 @@ class AppStore:
         self._docs_path = self.data_dir / "documents.json"
         self._sets_path = self.data_dir / "qa_sets.json"
         self._profiles_path = self.data_dir / "job_profiles.json"
+        self._job_descriptions_path = self.data_dir / "job_descriptions.json"
 
         dim = get_embedder_dim()
         store = VectorStore.load(self.data_dir, dim)
@@ -35,6 +36,7 @@ class AppStore:
         self.documents: Dict[str, dict] = self._load(self._docs_path)
         self.qa_sets: Dict[str, dict] = self._load(self._sets_path)
         self.job_profiles: Dict[str, dict] = self._load(self._profiles_path)
+        self.job_descriptions: Dict[str, dict] = self._load(self._job_descriptions_path)
 
         # Keep the vector index in sync with the document list: the persisted
         # FAISS index can drift (e.g. lost/replaced files, or docs uploaded
@@ -131,10 +133,15 @@ class AppStore:
         with open(self._profiles_path, "w", encoding="utf-8") as f:
             json.dump(list(self.job_profiles.values()), f, ensure_ascii=False, indent=2)
 
+    def _save_job_descriptions(self):
+        with open(self._job_descriptions_path, "w", encoding="utf-8") as f:
+            json.dump(list(self.job_descriptions.values()), f, ensure_ascii=False, indent=2)
+
     def persist(self):
         self._save_docs()
         self._save_sets()
         self._save_profiles()
+        self._save_job_descriptions()
         self.pipeline.store.save(self.data_dir)
 
     # -- documents --------------------------------------------------------
@@ -166,11 +173,28 @@ class AppStore:
         self.job_profiles[profile["id"]] = profile
         self._save_profiles()
 
+    def upsert_job_description(self, profile_id: str, text: str):
+        self.job_descriptions[profile_id] = {"id": profile_id, "text": text}
+        self._save_job_descriptions()
+
+    def get_job_description_text(self, profile_id: str) -> Optional[str]:
+        description = self.job_descriptions.get(profile_id)
+        return description.get("text") if description else None
+
+    def delete_job_description(self, profile_id: str) -> bool:
+        if profile_id not in self.job_descriptions:
+            return False
+        del self.job_descriptions[profile_id]
+        self._save_job_descriptions()
+        return True
+
     def delete_job_profile(self, profile_id: str) -> bool:
         if profile_id not in self.job_profiles:
             return False
         del self.job_profiles[profile_id]
+        self.job_descriptions.pop(profile_id, None)
         self._save_profiles()
+        self._save_job_descriptions()
         return True
 
     # -- qa sets ----------------------------------------------------------

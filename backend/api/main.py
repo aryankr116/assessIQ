@@ -44,6 +44,7 @@ from .schemas import (
     User,
     SystemParams,
     JobProfile,
+    JobDescriptionDetail,
     JobProfileCreateRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
@@ -260,10 +261,7 @@ def create_job_profile(req: JobProfileCreateRequest, _: dict = Depends(auth.requ
 def _save_job_profile(
     name: str,
     *,
-    skills: list[str] | None = None,
-    experience_requirement: str | None = None,
-    difficulty_level: str | None = None,
-    job_description_name: str | None = None,
+    job_description: dict | None = None,
 ):
     if not name.strip():
         raise HTTPException(status_code=422, detail="Job role name is required.")
@@ -273,21 +271,25 @@ def _save_job_profile(
         id=profile_id,
         name=name.strip(),
         created_at=_now_iso(),
-        skills=skills or [],
-        experience_requirement=experience_requirement,
-        difficulty_level=difficulty_level,
-        job_description_name=job_description_name,
+        skills=job_description["skills"] if job_description else [],
+        experience_requirement=(
+            job_description["experienceRequirement"] if job_description else None
+        ),
+        difficulty_level=(
+            job_description["difficultyLevel"] if job_description else None
+        ),
+        job_description_name=job_description["name"] if job_description else None,
+        job_description_word_count=(
+            job_description["wordCount"] if job_description else None
+        ),
     ).model_dump(by_alias=True)
     store.upsert_job_profile(profile)
+    if job_description:
+        store.upsert_job_description(profile_id, job_description["text"])
     return profile
 
 
-@app.post("/api/job-profiles/with-description")
-async def create_job_profile_with_description(
-    name: str = Form(...),
-    job_description: UploadFile = File(...),
-    _: dict = Depends(auth.require_user),
-):
+async def _extract_job_description(job_description: UploadFile) -> dict:
     filename = job_description.filename or ""
     if os.path.splitext(filename)[1].lower() != ".pdf":
         raise HTTPException(status_code=422, detail="Job description must be a PDF file.")
@@ -311,6 +313,14 @@ async def create_job_profile_with_description(
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
+    if not extracted:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No readable text could be extracted from the job description PDF. "
+                "If it is a scanned document, make sure OCR is available and try again."
+            ),
+        )
     if len(extracted) < 30:
         raise HTTPException(
             status_code=422,
@@ -325,13 +335,100 @@ async def create_job_profile_with_description(
         )
 
     experience_requirement, difficulty_level = extract_experience_requirement(extracted)
+    return {
+        "name": os.path.basename(filename),
+        "text": extracted,
+        "wordCount": len(extracted.split()),
+        "skills": skills,
+        "experienceRequirement": experience_requirement,
+        "difficultyLevel": difficulty_level,
+    }
+
+
+@app.post("/api/job-profiles/with-description")
+async def create_job_profile_with_description(
+    name: str = Form(...),
+    job_description: UploadFile = File(...),
+    _: dict = Depends(auth.require_user),
+):
+    description = await _extract_job_description(job_description)
     return _save_job_profile(
         name,
-        skills=skills,
-        experience_requirement=experience_requirement,
-        difficulty_level=difficulty_level,
-        job_description_name=os.path.basename(filename),
+        job_description=description,
     )
+
+
+@app.put("/api/job-profiles/{profile_id}/job-description")
+async def update_job_description(
+    profile_id: str,
+    job_description: UploadFile = File(...),
+    _: dict = Depends(auth.require_user),
+):
+    store = get_store()
+    profile = store.job_profiles.get(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Job profile not found.")
+
+    description = await _extract_job_description(job_description)
+    updated_profile = {
+        **profile,
+        "skills": description["skills"],
+        "experienceRequirement": description["experienceRequirement"],
+        "difficultyLevel": description["difficultyLevel"],
+        "jobDescriptionName": description["name"],
+        "jobDescriptionWordCount": description["wordCount"],
+    }
+    store.upsert_job_profile(updated_profile)
+    store.upsert_job_description(profile_id, description["text"])
+    return updated_profile
+
+
+@app.get("/api/job-profiles/{profile_id}/job-description")
+def get_job_description(
+    profile_id: str,
+    _: dict = Depends(auth.require_user),
+):
+    store = get_store()
+    profile = store.job_profiles.get(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Job profile not found.")
+    if not profile.get("jobDescriptionName"):
+        raise HTTPException(status_code=404, detail="No job description is attached to this profile.")
+
+    description = JobDescriptionDetail(
+        name=profile["jobDescriptionName"],
+        text=store.get_job_description_text(profile_id) or "",
+        word_count=profile.get("jobDescriptionWordCount"),
+        skills=profile.get("skills") or [],
+        experience_requirement=profile.get("experienceRequirement"),
+        difficulty_level=profile.get("difficultyLevel"),
+    )
+    return description.model_dump(by_alias=True)
+
+
+@app.delete("/api/job-profiles/{profile_id}/job-description", status_code=204)
+def delete_job_description(
+    profile_id: str,
+    _: dict = Depends(auth.require_user),
+):
+    store = get_store()
+    profile = store.job_profiles.get(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Job profile not found.")
+    if not profile.get("jobDescriptionName"):
+        raise HTTPException(status_code=404, detail="No job description is attached to this profile.")
+
+    updated_profile = {
+        **profile,
+        "skills": [],
+        "experienceRequirement": None,
+        "difficultyLevel": None,
+        "jobDescriptionName": None,
+        "jobDescriptionWordCount": None,
+    }
+    store.upsert_job_profile(updated_profile)
+    store.delete_job_description(profile_id)
+    return None
 
 
 @app.delete("/api/job-profiles/{profile_id}", status_code=204)

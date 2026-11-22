@@ -17,10 +17,11 @@ import {
 import { Card, TypeBadge, ConfidenceBar, UnanswerablePill } from "./ui.jsx";
 
 const SUB_TYPE_CONFIG = {
-  fundamentals: { label: "Fundamentals", icon: BookOpen, color: "text-sky-600 bg-sky-50 border-sky-200", timeColor: "text-sky-600" },
-  understanding: { label: "Understanding", icon: Brain, color: "text-indigo-600 bg-indigo-50 border-indigo-200", timeColor: "text-indigo-600" },
-  apply: { label: "Apply", icon: Zap, color: "text-purple-600 bg-purple-50 border-purple-200", timeColor: "text-purple-600" },
-  analyse: { label: "Analyse", icon: Lightbulb, color: "text-amber-600 bg-amber-50 border-amber-200", timeColor: "text-amber-600" },
+  fundamentals: { label: "Fundamentals", icon: BookOpen, color: "text-[#893A2A] bg-[#F8EAE4] border-[#E4B7A8]", timeColor: "text-[#893A2A]" },
+  understanding: { label: "Understanding", icon: Brain, color: "text-[#6E5424] bg-[#F6EFDF] border-[#D8B36E]", timeColor: "text-[#6E5424]" },
+  apply: { label: "Apply", icon: Zap, color: "text-[#6E3025] bg-[#F1D5C9] border-[#E4B7A8]", timeColor: "text-[#6E3025]" },
+  analyse: { label: "Analyse", icon: Lightbulb, color: "text-[#6E5424] bg-[#F6EFDF] border-[#D8B36E]", timeColor: "text-[#6E5424]" },
+  direct: { label: "Direct", icon: BookOpen, color: "text-sand-700 bg-sand-100 border-sand-200", timeColor: "text-sand-700" },
 };
 
 const OPTION_LETTERS = ["A", "B", "C", "D"];
@@ -70,7 +71,7 @@ export default function QuestionCard({ question, index, onRate }) {
             {index + 1}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold leading-snug text-slate-900 group-hover:text-brand-700 transition-colors">
+            <p className="font-display text-base font-semibold leading-snug text-slate-900 group-hover:text-brand-700 transition-colors">
               {q.question}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -96,7 +97,7 @@ export default function QuestionCard({ question, index, onRate }) {
             onClick={copyContent}
             title={copied ? "Copied!" : "Copy question"}
             className={`rounded-lg p-1.5 transition ${
-              copied ? "bg-emerald-50 text-emerald-600" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              copied ? "bg-brand-50 text-brand-700" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
             }`}
           >
             {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -107,7 +108,7 @@ export default function QuestionCard({ question, index, onRate }) {
               <button
                 onClick={(e) => rate(e, 1)}
                 title="Good question"
-                className={`rounded p-1 transition ${rating === 1 ? "bg-emerald-500 text-white shadow-xs" : "text-slate-400 hover:text-slate-600"}`}
+                className={`rounded p-1 transition ${rating === 1 ? "bg-brand-600 text-white shadow-xs" : "text-slate-400 hover:text-slate-600"}`}
               >
                 <ThumbsUp size={13} />
               </button>
@@ -150,14 +151,14 @@ export default function QuestionCard({ question, index, onRate }) {
                       key={i}
                       className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 text-sm transition ${
                         isCorrect
-                          ? "border-emerald-300 bg-emerald-50/80 text-emerald-800"
+                          ? "border-brand-300 bg-brand-50/80 text-brand-800"
                           : "border-slate-200 bg-white text-slate-700"
                       }`}
                     >
                       <span
                         className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold mt-0.5 ${
                           isCorrect
-                            ? "bg-emerald-500 text-white"
+                            ? "bg-brand-600 text-white"
                             : "bg-slate-200 text-slate-600"
                         }`}
                       >
@@ -165,7 +166,7 @@ export default function QuestionCard({ question, index, onRate }) {
                       </span>
                       <span className="flex-1">{opt}</span>
                       {isCorrect && (
-                        <CheckCircle2 size={16} className="flex-shrink-0 text-emerald-500 mt-0.5" />
+                        <CheckCircle2 size={16} className="flex-shrink-0 text-brand-600 mt-0.5" />
                       )}
                     </div>
                   );
